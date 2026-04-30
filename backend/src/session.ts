@@ -1,5 +1,5 @@
 import type { Skill } from "./skills/schema.js";
-import type { WebSocket } from "ws";
+import { WebSocket } from "ws";
 
 export class Session {
   id: string;
@@ -27,7 +27,7 @@ export class Session {
   }
 
   send(message: unknown) {
-    if (this.ws.readyState === 1) { // WebSocket.OPEN
+    if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     }
   }

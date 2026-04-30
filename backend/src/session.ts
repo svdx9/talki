@@ -3,6 +3,7 @@ import { WebSocket } from "ws";
 import { DeepgramClient } from "@deepgram/sdk";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./config.js";
+import { ElevenLabsStream } from "./elevenlabs.js";
 
 type DgSocket = Awaited<ReturnType<DeepgramClient["listen"]["v1"]["connect"]>>;
 
@@ -14,6 +15,7 @@ export class Session {
   createdAt: Date;
   private dgSocket: DgSocket | null = null;
   private anthropic: Anthropic | null = null;
+  private elevenLabsStream: ElevenLabsStream | null = null;
   private conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
 
   constructor(id: string, ws: WebSocket) {
@@ -43,6 +45,42 @@ export class Session {
 
   initAnthropic(apiKey: string) {
     this.anthropic = new Anthropic({ apiKey });
+  }
+
+  async initElevenLabs(config: { apiKey: string; voiceId: string }) {
+    this.elevenLabsStream = new ElevenLabsStream({
+      apiKey: config.apiKey,
+      voiceId: config.voiceId,
+    });
+
+    this.elevenLabsStream.on("audio", (audioBuffer: Buffer) => {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(audioBuffer);
+      }
+    });
+
+    this.elevenLabsStream.on("error", (error) => {
+      console.error(`ElevenLabs error for session ${this.id}:`, error);
+    });
+
+    await this.elevenLabsStream.connect();
+  }
+
+  sendToElevenLabs(text: string): void {
+    if (this.elevenLabsStream && !this.elevenLabsStream.closing) {
+      this.elevenLabsStream.sendSentence(text);
+    }
+  }
+
+  flushElevenLabs(): void {
+    this.elevenLabsStream?.flush();
+  }
+
+  async closeElevenLabs() {
+    if (this.elevenLabsStream) {
+      await this.elevenLabsStream.close();
+      this.elevenLabsStream = null;
+    }
   }
 
   async connectDeepgram(config: Config): Promise<void> {
@@ -84,12 +122,13 @@ export class Session {
     this.dgSocket?.sendCloseStream({ type: "CloseStream" });
   }
 
-  closeDeepgram() {
+  async closeDeepgram() {
     this.dgSocket?.close();
     this.dgSocket = null;
+    await this.closeElevenLabs();
   }
 
-  async streamAssistant(userText: string): Promise<void> {
+   async streamAssistant(userText: string): Promise<void> {
     if (!this.anthropic || !this.scenario) return;
 
     this.conversationHistory.push({ role: "user", content: userText });
@@ -117,6 +156,7 @@ export class Session {
     stream.on("text", (delta) => {
       this.send({ type: "assistant_text_delta", text: delta });
       fullText += delta;
+      this.sendToElevenLabs(delta);
     });
 
     try {
@@ -125,6 +165,7 @@ export class Session {
       if (textContent && textContent.type === "text") {
         this.conversationHistory.push({ role: "assistant", content: textContent.text });
       }
+      this.flushElevenLabs();
       this.send({ type: "assistant_done", fullText });
     } catch (err) {
       console.error(`Anthropic stream error for session ${this.id}:`, err);

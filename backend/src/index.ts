@@ -90,17 +90,22 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
       return;
     }
 
+    try {
+      await session.initElevenLabs({
+        apiKey: config.ELEVENLABS_API_KEY,
+        voiceId: scenario.voice,
+      });
+    } catch (e) {
+      console.error(`ElevenLabs connection error for session ${session.id}:`, e);
+      session.send({ type: "error", message: "Failed to connect to voice service" });
+      return;
+    }
+
     session.send({ type: "session_ready", greeting: scenario.opening_line });
 
-    // Generate TTS for opening line
-    try {
-      const audioBuffer = await generateTTS(scenario.opening_line, scenario.voice, config.ELEVENLABS_API_KEY);
-      if (audioBuffer && session.ws.readyState === WebSocket.OPEN) {
-        session.ws.send(audioBuffer);
-      }
-    } catch (e) {
-      console.error(`TTS error for session ${session.id}:`, e);
-    }
+    // Stream TTS for opening line (connection is now open)
+    session.sendToElevenLabs(scenario.opening_line);
+    session.flushElevenLabs();
   }
 
   if (msg.type === "end_utterance") {
@@ -112,35 +117,6 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
         console.error(`Assistant stream error for session ${session.id}:`, err);
       });
     }
-  }
-}
-
-async function generateTTS(text: string, voice: string, apiKey: string): Promise<Buffer | null> {
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream?output_format=opus_48000_192`;
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text,
-        model_id: "eleven_flash_v2_5",
-      }),
-    });
-
-    if (!response.ok) {
-      console.error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
-      return null;
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (e) {
-    console.error("TTS generation failed:", e);
-    return null;
   }
 }
 

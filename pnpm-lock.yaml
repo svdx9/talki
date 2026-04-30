@@ -28,6 +28,9 @@ importers:
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
+      opusscript:
+        specifier: ^0.1.1
+        version: 0.1.1
       talki-shared:
         specifier: workspace:*
         version: link:../shared
@@ -789,6 +792,9 @@ packages:
   node-releases@2.0.38:
     resolution: {integrity: sha512-3qT/88Y3FbH/Kx4szpQQ4HzUbVrHPKTLVpVocKiLfoYvw9XSGOX2FmD2d6DrXbVYyAQTF2HeF6My8jmzx7/CRw==}
 
+  opusscript@0.1.1:
+    resolution: {integrity: sha512-mL0fZZOUnXdZ78woRXp18lApwpp0lF5tozJOD1Wut0dgrA9WuQTgSels/CSmFleaAZrJi/nci5KOVtbuxeWoQA==}
+
   parse5@7.3.0:
     resolution: {integrity: sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw==}
 
@@ -1472,6 +1478,8 @@ snapshots:
   nanoid@3.3.11: {}
 
   node-releases@2.0.38: {}
+
+  opusscript@0.1.1: {}
 
   parse5@7.3.0:
     dependencies:

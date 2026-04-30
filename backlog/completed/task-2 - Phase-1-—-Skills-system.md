@@ -1,9 +1,10 @@
 ---
 id: TASK-2
 title: Phase 1 — Skills system
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 17:25'
+updated_date: '2026-04-30 13:42'
 labels:
   - phase-1
   - skills

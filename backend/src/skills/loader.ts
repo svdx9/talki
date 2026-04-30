@@ -1,7 +1,13 @@
 import { readdirSync, readFileSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import yaml from "js-yaml";
-import { SkillSchema, Skill } from "./schema";
+import { SkillSchema, Skill } from "./schema.js";
+
+export type { Skill };
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const CATALOG_DIR = resolve(__dirname, "catalog");
 

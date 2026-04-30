@@ -1,6 +1,12 @@
 {
-  "name": "shared",
+  "name": "talki-shared",
   "version": "0.0.1",
-  "main": "src/protocol.ts",
-  "types": "src/protocol.ts"
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
 }

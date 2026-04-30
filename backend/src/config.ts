@@ -1,4 +1,12 @@
 import { z } from "zod";
+import { config as dotenvConfig } from "dotenv";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenvConfig({ path: resolve(__dirname, "../../.env") });
 
 const configSchema = z.object({
   DEEPGRAM_API_KEY: z.string().min(1, "Deepgram API key required"),

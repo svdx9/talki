@@ -1,9 +1,10 @@
 ---
 id: TASK-4
 title: Phase 3 — STT (Deepgram)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 17:25'
+updated_date: '2026-04-30 15:23'
 labels:
   - phase-3
   - stt

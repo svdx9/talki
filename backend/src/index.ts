@@ -58,10 +58,13 @@ wss.on("connection", (ws: WebSocket) => {
       } catch (e) {
         session.send({ type: "error", message: "Invalid message format" });
       }
+    } else if (data instanceof Buffer || data instanceof ArrayBuffer) {
+      session.pushClientAudio(data);
     }
   });
 
   ws.on("close", () => {
+    session.closeDeepgram();
     sessions.delete(sessionId);
     console.log(`Session ${sessionId} disconnected`);
   });
@@ -76,6 +79,16 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
     }
 
     session.setScenario(scenario);
+    session.clearTranscript();
+
+    try {
+      await session.connectDeepgram(config);
+    } catch (e) {
+      console.error(`Deepgram connection error for session ${session.id}:`, e);
+      session.send({ type: "error", message: "Failed to connect to speech service" });
+      return;
+    }
+
     session.send({ type: "session_ready", greeting: scenario.opening_line });
 
     // Generate TTS for opening line
@@ -87,6 +100,10 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
     } catch (e) {
       console.error(`TTS error for session ${session.id}:`, e);
     }
+  }
+
+  if (msg.type === "end_utterance") {
+    session.endUtterance();
   }
 }
 

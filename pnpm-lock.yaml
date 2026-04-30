@@ -10,6 +10,9 @@ importers:
 
   backend:
     dependencies:
+      '@deepgram/sdk':
+        specifier: ^5.1.0
+        version: 5.1.0
       '@hono/node-server':
         specifier: ^1.0.0
         version: 1.19.14(hono@4.12.15)
@@ -155,6 +158,10 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
+
+  '@deepgram/sdk@5.1.0':
+    resolution: {integrity: sha512-pw4JsFLglvIAjk1C4rALHYBW5dHt30d3j25jsJhvoexTziLSTBK9LJlpeml/UDwHMILu4ZbBs3o0ZsF9DaHuZQ==}
+    engines: {node: '>=18.0.0'}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -1004,6 +1011,13 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@deepgram/sdk@5.1.0':
+    dependencies:
+      ws: 8.20.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

@@ -47,6 +47,7 @@ wss.on("connection", (ws: WebSocket) => {
   const sessionId = Math.random().toString(36).substring(7);
   const session = new Session(sessionId, ws);
   sessions.set(sessionId, session);
+  session.initAnthropic(config.ANTHROPIC_API_KEY);
 
   console.log(`Session ${sessionId} connected`);
 
@@ -104,6 +105,13 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
 
   if (msg.type === "end_utterance") {
     session.endUtterance();
+    const userText = session.transcript.trim();
+    session.clearTranscript();
+    if (userText) {
+      session.streamAssistant(userText).catch((err) => {
+        console.error(`Assistant stream error for session ${session.id}:`, err);
+      });
+    }
   }
 }
 

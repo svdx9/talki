@@ -1,6 +1,7 @@
 import type { Skill } from "./skills/schema.js";
 import { WebSocket } from "ws";
 import { DeepgramClient } from "@deepgram/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import type { Config } from "./config.js";
 
 type DgSocket = Awaited<ReturnType<DeepgramClient["listen"]["v1"]["connect"]>>;
@@ -12,6 +13,8 @@ export class Session {
   transcript: string = "";
   createdAt: Date;
   private dgSocket: DgSocket | null = null;
+  private anthropic: Anthropic | null = null;
+  private conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
 
   constructor(id: string, ws: WebSocket) {
     this.id = id;
@@ -21,6 +24,7 @@ export class Session {
 
   setScenario(scenario: Skill) {
     this.scenario = scenario;
+    this.conversationHistory = [];
   }
 
   appendTranscript(text: string) {
@@ -35,6 +39,10 @@ export class Session {
     if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     }
+  }
+
+  initAnthropic(apiKey: string) {
+    this.anthropic = new Anthropic({ apiKey });
   }
 
   async connectDeepgram(config: Config): Promise<void> {
@@ -79,5 +87,47 @@ export class Session {
   closeDeepgram() {
     this.dgSocket?.close();
     this.dgSocket = null;
+  }
+
+  async streamAssistant(userText: string): Promise<void> {
+    if (!this.anthropic || !this.scenario) return;
+
+    this.conversationHistory.push({ role: "user", content: userText });
+
+    const systemPrompt: Anthropic.TextBlockParam[] = [
+      {
+        type: "text",
+        text: this.scenario.system_prompt,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+
+    const stream = this.anthropic.messages.stream({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: this.conversationHistory.map(({ role, content }) => ({
+        role,
+        content,
+      })),
+    });
+
+    let fullText = "";
+
+    stream.on("text", (delta) => {
+      this.send({ type: "assistant_text_delta", text: delta });
+      fullText += delta;
+    });
+
+    try {
+      const finalMessage = await stream.finalMessage();
+      const textContent = finalMessage.content.find((b) => b.type === "text");
+      if (textContent && textContent.type === "text") {
+        this.conversationHistory.push({ role: "assistant", content: textContent.text });
+      }
+      this.send({ type: "assistant_done", fullText });
+    } catch (err) {
+      console.error(`Anthropic stream error for session ${this.id}:`, err);
+    }
   }
 }

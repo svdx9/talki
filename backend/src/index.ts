@@ -64,10 +64,16 @@ wss.on("connection", (ws: WebSocket) => {
     }
   });
 
-  ws.on("close", () => {
-    session.closeDeepgram();
+  ws.on("close", async (code: number, reason: Buffer<ArrayBufferLike>) => {
+    await session.closeDeepgram();
     sessions.delete(sessionId);
-    console.log(`Session ${sessionId} disconnected`);
+    console.log(`Session ${sessionId} disconnected: code ${code}, reason ${reason}`);
+  });
+
+  ws.on("error", async (error: Error) => {
+    await session.closeDeepgram();
+    sessions.delete(sessionId);
+    console.log(`Session ${sessionId} error: ${error}`);
   });
 });
 

@@ -10,6 +10,12 @@ export interface ElevenLabsConfig {
   outputFormat?: string;
 }
 
+type ElevenLabsEnvelope = {
+  audio?: string;
+  isFinal?: boolean;
+  error?: string;
+};
+
 export interface ElevenLabsWSClient extends EventEmitter {
   on(event: "audio", listener: (audioBuffer: Buffer) => void): this;
   on(event: "error", listener: (error: Error) => void): this;
@@ -124,42 +130,34 @@ export class ElevenLabsStream extends EventEmitter {
   }
 
   private handleMessage(data: WebSocket.Data) {
+    let jsonStr: string;
     if (typeof data === "string") {
-      try {
-        const msg = JSON.parse(data);
+      jsonStr = data;
+    } else if (data instanceof Buffer) {
+      jsonStr = data.toString("utf8");
+    } else if (data instanceof ArrayBuffer) {
+      jsonStr = Buffer.from(data).toString("utf8");
+    } else {
+      return;
+    }
 
-        if (msg.isFinal) {
-          this.emit("isFinal");
-        }
+    let msg: ElevenLabsEnvelope;
+    try {
+      msg = JSON.parse(jsonStr) as ElevenLabsEnvelope;
+    } catch (e) {
+      this.emit("error", new Error(`Malformed ElevenLabs frame: ${(e as Error).message}`));
+      return;
+    }
 
-        if (msg.error) {
-          this.emit("error", new Error(msg.error));
-        }
-      } catch (e) {
-        console.error("Failed to parse ElevenLabs message:", e);
-      }
-    } else if (data instanceof Buffer || data instanceof ArrayBuffer) {
-      try {
-        const raw = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        // ElevenLabs binary frames are JSON with base64 audio field
-        const jsonStr = raw.toString();
-        const msg = JSON.parse(jsonStr);
-
-        if (msg.audio) {
-          const audioBuffer = Buffer.from(msg.audio, "base64");
-          this.emit("audio", audioBuffer);
-        }
-
-        if (msg.isFinal) {
-          this.emit("isFinal");
-        }
-      } catch (e) {
-        // If JSON parse fails, treat the raw data as an Opus frame directly
-        const audioBuffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        if (audioBuffer.length > 0) {
-          this.emit("audio", audioBuffer);
-        }
-      }
+    if (msg.error) {
+      this.emit("error", new Error(msg.error));
+      return;
+    }
+    if (msg.audio) {
+      this.emit("audio", Buffer.from(msg.audio, "base64"));
+    }
+    if (msg.isFinal) {
+      this.emit("isFinal");
     }
   }
 

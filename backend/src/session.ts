@@ -128,7 +128,7 @@ export class Session {
     await this.closeElevenLabs();
   }
 
-   async streamAssistant(userText: string): Promise<void> {
+  async streamAssistant(userText: string): Promise<void> {
     if (!this.anthropic || !this.scenario) return;
 
     this.conversationHistory.push({ role: "user", content: userText });

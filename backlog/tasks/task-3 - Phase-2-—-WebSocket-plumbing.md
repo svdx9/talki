@@ -1,16 +1,16 @@
 ---
 id: TASK-3
 title: Phase 2 — WebSocket plumbing
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 17:25'
+updated_date: '2026-05-01 09:20'
 labels:
   - phase-2
   - websocket
 dependencies: []
 priority: high
 ---
-
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 ws server attached to Hono HTTP server on /api/ws

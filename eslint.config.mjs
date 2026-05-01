@@ -4,7 +4,7 @@ import globals from "globals";
 
 export default tseslint.config(
   {
-    ignores: ["dist/", "node_modules/", "*.config.*", "backlog/"],
+    ignores: ["dist/", "node_modules/", "**/*.config.*", "backlog/"],
   },
 
   // Base TypeScript config with project service for auto-discovery of tsconfig.json
@@ -15,13 +15,14 @@ export default tseslint.config(
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
+        allowDefaultProject: ["frontend/vite.config.ts"],
       },
     },
   },
 
   // Only type-check TS/TSX files; ignore JS dist artifacts and config files
   {
-    ignores: ["**/*.js", "**/*.cjs", "**/*.mjs", "**/vite.config.ts", "**/dist/**"],
+    ignores: ["**/*.js", "**/*.cjs", "**/*.mjs", "**/dist/**"],
   },
 
   // Strict type-checked rules

@@ -38,7 +38,7 @@ export class ElevenLabsStream extends EventEmitter {
     super();
     this.config = {
       modelId: "eleven_flash_v2_5",
-      outputFormat: "pcm_48000",
+      outputFormat: "audio-24khz-96kbitrate-mono-mp3",
       ...config,
     };
   }

@@ -12,6 +12,7 @@ export class Session {
   ws: WebSocket;
   scenario: Skill | null = null;
   transcript = "";
+  utteranceOpen = false;
   createdAt: Date;
   private dgSocket: DgSocket | null = null;
   private anthropic: Anthropic | null = null;
@@ -48,6 +49,7 @@ export class Session {
   }
 
   async initElevenLabs(config: { apiKey: string; voiceId: string }) {
+    console.warn(`Session ${this.id}: connecting to ElevenLabs (voice=${config.voiceId})...`);
     this.elevenLabsStream = new ElevenLabsStream({
       apiKey: config.apiKey,
       voiceId: config.voiceId,
@@ -64,6 +66,7 @@ export class Session {
     });
 
     await this.elevenLabsStream.connect();
+    console.warn(`Session ${this.id}: ElevenLabs connected`);
   }
 
   sendToElevenLabs(text: string): void {
@@ -84,7 +87,8 @@ export class Session {
   }
 
   async connectDeepgram(config: Config): Promise<void> {
-    const dg = new DeepgramClient();
+    console.warn(`Session ${this.id}: connecting to Deepgram...`);
+    const dg = new DeepgramClient({ apiKey: config.DEEPGRAM_API_KEY });
     this.dgSocket = await dg.listen.v1.connect({
       model: "nova-3",
       language: "fr",
@@ -106,7 +110,7 @@ export class Session {
     });
 
     this.dgSocket.on("error", (err) => {
-      console.error(`Deepgram error for session ${this.id}:`, err);
+      console.warn(`Session ${this.id}: Deepgram socket error: ${err instanceof Error ? err.message : String(err)}`);
     });
 
     this.dgSocket.connect();
@@ -130,6 +134,7 @@ export class Session {
 
   async streamAssistant(userText: string): Promise<void> {
     if (!this.anthropic || !this.scenario) return;
+    console.warn(`Session ${this.id}: streaming Anthropic reply (user=${JSON.stringify(userText.slice(0, 60))})`);
 
     this.conversationHistory.push({ role: "user", content: userText });
 

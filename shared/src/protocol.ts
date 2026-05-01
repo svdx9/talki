@@ -1,12 +1,14 @@
 // WebSocket protocol shared between frontend and backend.
 //
 // Text frames carry JSON control messages (the types below).
-// Binary frames carry raw PCM audio (48 kHz, 16-bit signed little-endian):
-//   - client -> server: microphone capture chunks while user holds push-to-talk
-//   - server -> client: ElevenLabs TTS output streamed back to the browser
+// Binary frames are only valid inside an utterance window:
+//   client opens it with `start_utterance`, streams audio chunks (webm/opus),
+//   and closes it with `end_utterance`. Binary frames received outside this
+//   window are protocol violations and the server replies with an `error`.
 
 export type ClientMsg =
   | { type: "start_session"; scenarioId: string }
+  | { type: "start_utterance" }
   | { type: "end_utterance" }
   | { type: "cancel" };
 

@@ -12,6 +12,7 @@ const App: Component = () => {
   const [assistantText, setAssistantText] = createSignal("");
   const [isRecording, setIsRecording] = createSignal(false);
   const [isAssistantSpeaking, setIsAssistantSpeaking] = createSignal(false);
+  const [errorMessage, setErrorMessage] = createSignal("");
 
   let ws: WebSocket | null = null;
   let player: AudioPlayer | null = null;
@@ -60,8 +61,8 @@ const App: Component = () => {
           if (player && buf.byteLength > 0) {
             player.play(buf);
           }
-        }).catch(() => {
-          // ignore
+        }).catch((err: unknown) => {
+          console.error("Failed to decode audio chunk:", err);
         });
       }
     };
@@ -99,8 +100,8 @@ const App: Component = () => {
           if (ws?.readyState === WebSocket.OPEN) {
             ws.send(buf);
           }
-        }).catch(() => {
-          // ignore
+        }).catch((err: unknown) => {
+          console.error("Failed to read audio chunk for upload:", err);
         });
       }
     };
@@ -126,8 +127,11 @@ const App: Component = () => {
     if (isRecording()) {
       stopRecording();
     } else {
-      startRecording().catch(() => {
-        // ignore
+      setErrorMessage("");
+      startRecording().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("startRecording failed:", err);
+        setErrorMessage(`Microphone error: ${msg}`);
       });
     }
   };
@@ -183,6 +187,10 @@ const App: Component = () => {
 
       {isAssistantSpeaking() && (
         <p style={{ color: "#007aff", "font-style": "italic" }}>Tutor is speaking...</p>
+      )}
+
+      {errorMessage() && (
+        <p style={{ color: "#ff3b30" }}>{errorMessage()}</p>
       )}
 
       <div

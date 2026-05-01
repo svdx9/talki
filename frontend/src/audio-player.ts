@@ -24,7 +24,9 @@ export class AudioPlayer {
   play(chunk: ArrayBuffer): void {
     if (this.paused) return;
     if (this.ctx.state === "suspended") {
-      this.ctx.resume().catch(() => { /* ignore */ });
+      this.ctx.resume().catch((err: unknown) => {
+        console.error("AudioContext resume failed:", err);
+      });
     }
 
     const pcm16 = new Int16Array(chunk);
@@ -51,12 +53,16 @@ export class AudioPlayer {
 
   pause(): void {
     this.paused = true;
-    this.ctx.suspend().catch(() => { /* ignore */ });
+    this.ctx.suspend().catch((err: unknown) => {
+      console.error("AudioContext suspend failed:", err);
+    });
   }
 
   resume(): void {
     this.paused = false;
-    this.ctx.resume().catch(() => { /* ignore */ });
+    this.ctx.resume().catch((err: unknown) => {
+      console.error("AudioContext resume failed:", err);
+    });
   }
 
   flush(): void {
@@ -73,6 +79,8 @@ export class AudioPlayer {
   }
 
   destroy(): void {
-    this.ctx.close().catch(() => { /* ignore */ });
+    this.ctx.close().catch((err: unknown) => {
+      console.error("AudioContext close failed:", err);
+    });
   }
 }

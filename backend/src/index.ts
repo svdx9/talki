@@ -1,6 +1,8 @@
 import { Hono } from "hono";
-import { createServer } from "http";
+import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import type { IncomingMessage } from "http";
+import type { Duplex } from "stream";
 import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 import { loadConfig } from "./config.js";
@@ -27,22 +29,11 @@ app.use("/*", serveStatic({ root: "./frontend/dist" }));
 const config = loadConfig();
 const port = config.PORT;
 
-const server = createServer((req, res) => {
-  const handle = async () => {
-    try {
-      await app.fetch(req as unknown as Request, res);
-    } catch {
-      // ignore
-    }
-  };
-  handle().catch(() => {
-    // ignore
-  });
-});
+const server = serve({ fetch: app.fetch, port });
 
 const wss = new WebSocketServer({ noServer: true });
 
-server.on("upgrade", (request, socket, head) => {
+server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
   const url = new URL(request.url ?? "", `http://${request.headers.host ?? ""}`);
   if (url.pathname === "/api/ws") {
     wss.handleUpgrade(request, socket, head, (ws) => {
@@ -143,4 +134,3 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
 }
 
 console.warn(`Server starting on port ${String(port)}...`);
-server.listen(port);

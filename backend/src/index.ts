@@ -30,15 +30,14 @@ let config: Config;
 try {
   config = loadConfig();
 } catch (err) {
-  console.error("Config load failed — set DEEPGRAM_API_KEY, ANTHROPIC_API_KEY, ELEVENLABS_API_KEY in backend/.env");
+  console.error("Config load failed — set MISTRAL_API_KEY and ANTHROPIC_API_KEY in .env");
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 }
 const port = config.PORT;
 console.warn(
-  `Config loaded: DEEPGRAM=${config.DEEPGRAM_API_KEY ? "set" : "missing"} ` +
-  `ANTHROPIC=${config.ANTHROPIC_API_KEY ? "set" : "missing"} ` +
-  `ELEVENLABS=${config.ELEVENLABS_API_KEY ? "set" : "missing"}`
+  `Config loaded: MISTRAL=${config.MISTRAL_API_KEY ? "set" : "missing"} ` +
+  `ANTHROPIC=${config.ANTHROPIC_API_KEY ? "set" : "missing"}`
 );
 
 const server = serve({ fetch: app.fetch, port });
@@ -84,42 +83,40 @@ wss.on("connection", (ws: WebSocket) => {
       session.send({ type: "error", message: "Invalid message format" });
       return;
     }
-    console.warn(`Session ${sessionId} <- ${msg.type}`);
-    handleClientMessage(session, msg).catch((err: unknown) => {
-      console.error(`Session ${sessionId} handler error for ${msg.type}:`, err);
-      session.send({
-        type: "error",
-        message: err instanceof Error ? err.message : "Handler failed",
-      });
-    });
+     console.warn(`Session ${sessionId} <- ${msg.type}`);
+     try {
+       handleClientMessage(session, msg);
+     } catch (err: unknown) {
+       console.error(`Session ${sessionId} handler error for ${msg.type}:`, err);
+       session.send({
+         type: "error",
+         message: err instanceof Error ? err.message : "Handler failed",
+       });
+     }
   });
 
-  ws.on("close", (code: number, reason: Buffer) => {
-    session.closeDeepgram().catch(() => {
-      // ignore
-    });
-    sessions.delete(sessionId);
-    console.warn(`Session ${sessionId} disconnected: code ${String(code)}, reason ${String(reason)}`);
-  });
+   ws.on("close", (code: number, reason: Buffer) => {
+     session.closeVoxtral();
+     sessions.delete(sessionId);
+     console.warn(`Session ${sessionId} disconnected: code ${String(code)}, reason ${String(reason)}`);
+   });
 
-  ws.on("error", (error: Error) => {
-    session.closeDeepgram().catch(() => {
-      // ignore
-    });
-    sessions.delete(sessionId);
-    console.warn(`Session ${sessionId} error: ${error}`);
-  });
+   ws.on("error", (error: Error) => {
+     session.closeVoxtral();
+     sessions.delete(sessionId);
+     console.warn(`Session ${sessionId} error: ${error}`);
+   });
 });
 
-function describeUpstreamError(e: unknown): string {
-  const raw = extractErrorText(e);
-  const status = /\b(\d{3})\b/.exec(raw)?.[1];
-  if (status === "401" || status === "403") return "authentication failed (check API key)";
-  if (status === "429") return "rate limited";
-  if (status && /^5\d\d$/.test(status)) return `upstream ${status}`;
-  return raw.replace(/\s+/g, " ").slice(0, 200);
-}
-
+function _describeUpstreamError(e: unknown): string {
+   const raw = extractErrorText(e);
+   const status = /\b(\d{3})\b/.exec(raw)?.[1];
+   if (status === "401" || status === "403") return "authentication failed (check API key)";
+   if (status === "429") return "rate limited";
+   if (status && /^5\d\d$/.test(status)) return `upstream ${status}`;
+   return "service error";
+ }
+ 
 function extractErrorText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (typeof e === "string") return e;
@@ -148,44 +145,28 @@ function extractErrorText(e: unknown): string {
   return String(e);
 }
 
-async function handleClientMessage(session: Session, msg: ClientMsg) {
-  if (msg.type === "start_session") {
-    const scenario = skills.find((s) => s.id === msg.scenarioId);
-    if (!scenario) {
-      session.send({ type: "error", message: "Scenario not found" });
-      return;
-    }
+function handleClientMessage(session: Session, msg: ClientMsg) {
+   if (msg.type === "start_session") {
+     const scenario = skills.find((s) => s.id === msg.scenarioId);
+     if (!scenario) {
+       session.send({ type: "error", message: "Scenario not found" });
+       return;
+     }
 
-    session.setScenario(scenario);
-    session.clearTranscript();
+     session.setScenario(scenario);
+     session.clearTranscript();
 
-    try {
-      await session.connectDeepgram(config);
-    } catch (e: unknown) {
-      const reason = describeUpstreamError(e);
-      console.warn(`Session ${session.id}: Deepgram connect failed — ${reason}`);
-      session.send({ type: "error", message: `Speech service unavailable: ${reason}` });
-      return;
-    }
+     session.startVoxtralSTT({
+       apiKey: config.MISTRAL_API_KEY,
+       voiceId: scenario.voice,
+     });
 
-    try {
-      await session.initElevenLabs({
-        apiKey: config.ELEVENLABS_API_KEY,
-        voiceId: scenario.voice,
-      });
-    } catch (e: unknown) {
-      const reason = describeUpstreamError(e);
-      console.warn(`Session ${session.id}: ElevenLabs connect failed — ${reason}`);
-      session.send({ type: "error", message: `Voice service unavailable: ${reason}` });
-      return;
-    }
+     session.send({ type: "session_ready", greeting: scenario.opening_line });
 
-    session.send({ type: "session_ready", greeting: scenario.opening_line });
-
-    // Stream TTS for opening line (connection is now open)
-    session.sendToElevenLabs(scenario.opening_line);
-    session.flushElevenLabs();
-  }
+     session.sendToVoxtral(scenario.opening_line).catch((e: unknown) => {
+       console.error("TTS error:", e);
+     });
+   }
 
   if (msg.type === "start_utterance") {
     if (session.utteranceOpen) {

@@ -5,13 +5,17 @@ import { ScenarioPicker } from "./scenario-picker";
 import { ChatWindow } from "./chat-window";
 import { OpusPlayer } from "./opus-player";
 
+const SAMPLE_RATE = 16000;
+
 const App: Component = () => {
   const ws = createWsStore();
   const [isRecording, setIsRecording] = createSignal(false);
   const [selectedScenario, setSelectedScenario] = createSignal<string | null>(null);
 
-  let mediaRecorder: MediaRecorder | null = null;
   let player: OpusPlayer | null = null;
+  let audioContext: AudioContext | null = null;
+  let workletNode: AudioWorkletNode | null = null;
+  let mediaStream: MediaStream | null = null;
 
   const startAudioPlayer = () => {
     player = new OpusPlayer();
@@ -29,33 +33,46 @@ const App: Component = () => {
 
   const startRecording = async () => {
     if (!player) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream, {
-      mimeType: "audio/webm;codecs=opus",
-    });
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
 
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        e.data.arrayBuffer().then((buf) => {
-          ws.sendAudioChunk(buf);
-        }).catch((err: unknown) => {
-          console.error("Failed to send audio chunk:", err);
-        });
-      }
+    await audioContext.audioWorklet.addModule(
+      new URL("./pcm-processor.worklet.ts", import.meta.url).href
+    );
+
+    workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
+    workletNode.port.onmessage = (event: MessageEvent<{ buffer: ArrayBuffer }>) => {
+      const uint8 = new Uint8Array(event.data.buffer);
+      ws.sendAudioChunk(uint8.buffer);
     };
 
-    mediaRecorder.onstop = () => {
-      stream.getTracks().forEach((t) => { t.stop(); });
-      ws.endUtterance();
-    };
+    const source = audioContext.createMediaStreamSource(mediaStream);
+    source.connect(workletNode);
+    workletNode.connect(audioContext.destination);
 
     ws.startUtterance();
-    mediaRecorder.start(250);
     setIsRecording(true);
   };
 
   const stopRecording = () => {
-    mediaRecorder?.stop();
+    if (workletNode) {
+      workletNode.port.onmessage = null;
+      workletNode.disconnect();
+      workletNode = null;
+    }
+     if (audioContext) {
+       void audioContext.close().catch((): void => {
+         // Silently ignore errors closing audio context
+       });
+       audioContext = null;
+     }
+     if (mediaStream) {
+       mediaStream.getTracks().forEach((t): void => {
+         t.stop();
+       });
+       mediaStream = null;
+     }
+    ws.endUtterance();
     setIsRecording(false);
   };
 
@@ -74,8 +91,8 @@ const App: Component = () => {
   });
 
   onCleanup(() => {
-    if (mediaRecorder && isRecording()) {
-      mediaRecorder.stop();
+    if (isRecording()) {
+      stopRecording();
     }
     if (player) {
       player.destroy();

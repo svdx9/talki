@@ -1,11 +1,13 @@
 import type { Skill } from "./skills/schema.js";
 import { WebSocket } from "ws";
-import { DeepgramClient } from "@deepgram/sdk";
 import Anthropic from "@anthropic-ai/sdk";
-import type { Config } from "./config.js";
-import { ElevenLabsStream } from "./elevenlabs.js";
+import { Mistral } from "@mistralai/mistralai";
 
-type DgSocket = Awaited<ReturnType<DeepgramClient["listen"]["v1"]["connect"]>>;
+// @ts-expect-error — runtime resolves to node_modules/@mistralai/mistralai/extra/realtime
+import { RealtimeTranscription, AudioEncoding } from "@mistralai/mistralai/extra/realtime";
+import type { AudioFormat } from "@mistralai/mistralai/extra/realtime";
+
+const MISTRAL_TTS_URL = "https://api.mistral.ai/v1/audio/speech";
 
 export class Session {
   id: string;
@@ -14,9 +16,13 @@ export class Session {
   transcript = "";
   utteranceOpen = false;
   createdAt: Date;
-  private dgSocket: DgSocket | null = null;
   private anthropic: Anthropic | null = null;
-  private elevenLabsStream: ElevenLabsStream | null = null;
+   private mistral: Mistral | null = null;
+   // @ts-expect-error — RealtimeTranscription is from the SDK, TypeScript may not resolve the subpath
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   private realtimeClient: any = null;
+  private sttController: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private sttStreamDone = false;
   private conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
 
   constructor(id: string, ws: WebSocket) {
@@ -48,88 +54,139 @@ export class Session {
     this.anthropic = new Anthropic({ apiKey });
   }
 
-  async initElevenLabs(config: { apiKey: string; voiceId: string }) {
-    console.warn(`Session ${this.id}: connecting to ElevenLabs (voice=${config.voiceId})...`);
-    this.elevenLabsStream = new ElevenLabsStream({
-      apiKey: config.apiKey,
-      voiceId: config.voiceId,
-    });
+   initMistral(config: { apiKey: string; voiceId: string }) {
+     this.mistral = new Mistral({ apiKey: config.apiKey });
+     // @ts-expect-error — RealtimeTranscription type not available
+     this.realtimeClient = new RealtimeTranscription({ apiKey: config.apiKey });
+   }
 
-    this.elevenLabsStream.on("audio", (audioBuffer: Buffer) => {
-      if (this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(audioBuffer);
-      }
-    });
+   private asyncSttStream(): ReadableStream<Uint8Array> {
+     return new ReadableStream<Uint8Array>({
+       pull: (controller) => {
+         if (this.sttStreamDone) {
+           controller.close();
+         }
+       },
+       cancel: () => {
+         this.sttController = null;
+       },
+       start: (controller) => {
+         this.sttController = controller;
+       },
+     });
+   }
 
-    this.elevenLabsStream.on("error", (error) => {
-      console.error(`ElevenLabs error for session ${this.id}:`, error);
-    });
+   startVoxtralSTT(config: { apiKey: string; voiceId: string }): void {
+     this.initMistral(config);
+     console.warn(`Session ${this.id}: starting Voxtral STT...`);
 
-    await this.elevenLabsStream.connect();
-    console.warn(`Session ${this.id}: ElevenLabs connected`);
+     const audioStream = this.asyncSttStream();
+     const audioFormat: AudioFormat = {
+       encoding: AudioEncoding.PcmS16le,
+       sampleRate: 16000,
+     };
+
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      (async () => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
+          const iter = this.realtimeClient?.transcribeStream(
+            audioStream,
+            "voxtral-mini-transcribe-realtime-2602",
+            { audioFormat }
+          );
+           // @ts-expect-error — iter is typed as any from the SDK
+           for await (const event of iter) {
+             if ((event as { type: string }).type === "transcription.text.delta") {
+              const deltaEvent = event as { type: "transcription.text.delta"; text: string };
+              this.send({ type: "transcript", text: deltaEvent.text, isFinal: false });
+            } else if ((event as { type: string }).type === "transcription.done") {
+              this.send({ type: "transcript", text: "", isFinal: true });
+              break;
+            } else if ((event as { type: string }).type === "error") {
+              const errEvent = event as { type: "error"; error?: { message?: unknown } };
+              const errMsg = errEvent.error?.message;
+              const msg = typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg);
+              console.error(`Session ${this.id}: Voxtral STT error — ${msg}`);
+              this.send({ type: "error", message: `STT error: ${msg}` });
+              break;
+            }
+          }
+        } catch (err: unknown) {
+          console.error(`Session ${this.id}: Voxtral STT stream error:`, err);
+          this.send({ type: "error", message: "STT stream error" });
+        }
+      })();
+
+     console.warn(`Session ${this.id}: Voxtral STT started`);
+   }
+
+  pushClientAudio(data: Buffer | ArrayBuffer): void {
+    if (!this.sttController || this.sttStreamDone) return;
+    const uint8 = new Uint8Array(data instanceof Buffer ? data : new Uint8Array(data));
+    this.sttController.enqueue(uint8);
   }
 
-  sendToElevenLabs(text: string): void {
-    if (this.elevenLabsStream && !this.elevenLabsStream.closing) {
-      this.elevenLabsStream.sendSentence(text);
+  endUtterance(): void {
+    if (!this.sttController || this.sttStreamDone) return;
+    this.sttStreamDone = true;
+    this.sttController.close();
+    this.sttController = null;
+  }
+
+   closeVoxtral(): void {
+     this.sttStreamDone = true;
+     this.sttController?.close();
+     this.sttController = null;
+     this.realtimeClient = null;
+     this.mistral = null;
+   }
+
+  async sendToVoxtral(text: string): Promise<void> {
+    if (!this.scenario) return;
+    const apiKey = process.env.MISTRAL_API_KEY;
+    if (!apiKey) return;
+
+    try {
+      const response = await fetch(MISTRAL_TTS_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "voxtral-mini-tts-2603",
+          input: text,
+          voice_id: this.scenario.voice,
+          response_format: "mp3",
+        }),
+      });
+
+       if (!response.ok) {
+         const body = await response.text();
+         console.error(`Session ${this.id}: Voxtral TTS HTTP ${String(response.status)}: ${body}`);
+         return;
+       }
+
+       const body = response.body;
+       if (!body) return;
+
+       const reader = body.getReader();
+       try {
+         let chunk = await reader.read();
+         while (!chunk.done) {
+           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+           if (chunk.value) {
+             this.ws.send(chunk.value);
+           }
+           chunk = await reader.read();
+         }
+       } finally {
+         reader.releaseLock();
+       }
+    } catch (err: unknown) {
+      console.error(`Session ${this.id}: Voxtral TTS error:`, err);
     }
-  }
-
-  flushElevenLabs(): void {
-    this.elevenLabsStream?.flush();
-  }
-
-  async closeElevenLabs() {
-    if (this.elevenLabsStream) {
-      await this.elevenLabsStream.close();
-      this.elevenLabsStream = null;
-    }
-  }
-
-  async connectDeepgram(config: Config): Promise<void> {
-    console.warn(`Session ${this.id}: connecting to Deepgram...`);
-    const dg = new DeepgramClient({ apiKey: config.DEEPGRAM_API_KEY });
-    this.dgSocket = await dg.listen.v1.connect({
-      model: "nova-3",
-      language: "fr",
-      interim_results: "true",
-      Authorization: `Token ${config.DEEPGRAM_API_KEY}`,
-    });
-
-    this.dgSocket.on("message", (msg) => {
-      if ((msg as { type?: string }).type !== "Results") return;
-      const results = msg as {
-        channel?: { alternatives?: { transcript?: string }[] };
-        is_final?: boolean;
-      };
-      const text = results.channel?.alternatives?.[0]?.transcript;
-      if (!text) return;
-      const isFinal = !!results.is_final;
-      this.send({ type: "transcript", text, isFinal });
-      if (isFinal) this.appendTranscript(text + " ");
-    });
-
-    this.dgSocket.on("error", (err) => {
-      console.warn(`Session ${this.id}: Deepgram socket error: ${err instanceof Error ? err.message : String(err)}`);
-    });
-
-    this.dgSocket.connect();
-    await this.dgSocket.waitForOpen();
-    console.warn(`Deepgram connected for session ${this.id}`);
-  }
-
-  pushClientAudio(data: Buffer | ArrayBuffer) {
-    this.dgSocket?.sendMedia(data);
-  }
-
-  endUtterance() {
-    this.dgSocket?.sendCloseStream({ type: "CloseStream" });
-  }
-
-  async closeDeepgram() {
-    this.dgSocket?.close();
-    this.dgSocket = null;
-    await this.closeElevenLabs();
   }
 
   async streamAssistant(userText: string): Promise<void> {
@@ -158,11 +215,13 @@ export class Session {
 
     let fullText = "";
 
-    stream.on("text", (delta) => {
-      this.send({ type: "assistant_text_delta", text: delta });
-      fullText += delta;
-      this.sendToElevenLabs(delta);
-    });
+     stream.on("text", (delta) => {
+       this.send({ type: "assistant_text_delta", text: delta });
+       fullText += delta;
+       this.sendToVoxtral(delta).catch((err: unknown) => {
+         console.error(`Session ${this.id}: TTS error:`, err);
+       });
+     });
 
     try {
       const finalMessage = await stream.finalMessage();
@@ -170,7 +229,6 @@ export class Session {
       if (textContent?.type === "text") {
         this.conversationHistory.push({ role: "assistant", content: textContent.text });
       }
-      this.flushElevenLabs();
       this.send({ type: "assistant_done", fullText });
     } catch (err) {
       console.error(`Anthropic stream error for session ${this.id}:`, err);

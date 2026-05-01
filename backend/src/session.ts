@@ -2,10 +2,7 @@ import type { Skill } from "./skills/schema.js";
 import { WebSocket } from "ws";
 import Anthropic from "@anthropic-ai/sdk";
 import { Mistral } from "@mistralai/mistralai";
-
-// @ts-expect-error — runtime resolves to node_modules/@mistralai/mistralai/extra/realtime
-import { RealtimeTranscription, AudioEncoding } from "@mistralai/mistralai/extra/realtime";
-import type { AudioFormat } from "@mistralai/mistralai/extra/realtime";
+import { createRealtimeClient, transcribeStream, AudioEncoding, type AudioFormat } from "./integrations/mistral-realtime.js";
 
 const MISTRAL_TTS_URL = "https://api.mistral.ai/v1/audio/speech";
 
@@ -18,9 +15,7 @@ export class Session {
   createdAt: Date;
   private anthropic: Anthropic | null = null;
    private mistral: Mistral | null = null;
-   // @ts-expect-error — RealtimeTranscription is from the SDK, TypeScript may not resolve the subpath
-   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-   private realtimeClient: any = null;
+   private realtimeClient: unknown = null;
   private sttController: ReadableStreamDefaultController<Uint8Array> | null = null;
   private sttStreamDone = false;
   private conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
@@ -56,8 +51,7 @@ export class Session {
 
    initMistral(config: { apiKey: string; voiceId: string }) {
      this.mistral = new Mistral({ apiKey: config.apiKey });
-     // @ts-expect-error — RealtimeTranscription type not available
-     this.realtimeClient = new RealtimeTranscription({ apiKey: config.apiKey });
+     this.realtimeClient = createRealtimeClient(config.apiKey);
    }
 
    private asyncSttStream(): ReadableStream<Uint8Array> {
@@ -86,37 +80,28 @@ export class Session {
        sampleRate: 16000,
      };
 
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      (async () => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
-          const iter = this.realtimeClient?.transcribeStream(
-            audioStream,
-            "voxtral-mini-transcribe-realtime-2602",
-            { audioFormat }
-          );
-           // @ts-expect-error — iter is typed as any from the SDK
-           for await (const event of iter) {
-             if ((event as { type: string }).type === "transcription.text.delta") {
-              const deltaEvent = event as { type: "transcription.text.delta"; text: string };
-              this.send({ type: "transcript", text: deltaEvent.text, isFinal: false });
-            } else if ((event as { type: string }).type === "transcription.done") {
-              this.send({ type: "transcript", text: "", isFinal: true });
-              break;
-            } else if ((event as { type: string }).type === "error") {
-              const errEvent = event as { type: "error"; error?: { message?: unknown } };
-              const errMsg = errEvent.error?.message;
-              const msg = typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg);
-              console.error(`Session ${this.id}: Voxtral STT error — ${msg}`);
-              this.send({ type: "error", message: `STT error: ${msg}` });
-              break;
-            }
-          }
-        } catch (err: unknown) {
-          console.error(`Session ${this.id}: Voxtral STT stream error:`, err);
-          this.send({ type: "error", message: "STT stream error" });
-        }
-      })();
+       void (async () => {
+         try {
+           if (!this.realtimeClient) return;
+           for await (const event of transcribeStream(this.realtimeClient, audioStream, "voxtral-mini-transcribe-realtime-2602", audioFormat)) {
+             if (event.type === "transcription.text.delta") {
+               this.send({ type: "transcript", text: event.text, isFinal: false });
+             } else if (event.type === "transcription.done") {
+               this.send({ type: "transcript", text: "", isFinal: true });
+               break;
+             } else if (event.type === "error") {
+               const errMsg = (event as { error?: { message?: unknown } }).error?.message;
+               const msg = typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg);
+               console.error(`Session ${this.id}: Voxtral STT error — ${msg}`);
+               this.send({ type: "error", message: `STT error: ${msg}` });
+               break;
+             }
+           }
+         } catch (err: unknown) {
+           console.error(`Session ${this.id}: Voxtral STT stream error:`, err);
+           this.send({ type: "error", message: "STT stream error" });
+         }
+       })();
 
      console.warn(`Session ${this.id}: Voxtral STT started`);
    }

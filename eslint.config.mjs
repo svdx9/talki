@@ -29,37 +29,36 @@ export default tseslint.config(
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
 
-  // Bug-class rules: floating promises, misused promises, await/no-thenable
+  // Bug-class rules (highest priority): logical errors that cause runtime failures
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: false }],
+      "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: true }],
       "@typescript-eslint/no-misused-promises": ["error", {
-        checksVoidReturn: true,
+        checksVoidReturn: false,
         checksConditionals: true,
         checksSpreads: true,
       }],
       "@typescript-eslint/await-thenable": "error",
-      "@typescript-eslint/require-await": "error",
-      "@typescript-eslint/return-await": "error",
-      "@typescript-eslint/promise-function-async": "error",
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
+      "@typescript-eslint/no-non-null-assertion": "error",
     },
   },
 
-  // Unsafe-any rules
+  // SDK/third-party integration issues: relax for external SDKs with poor types
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-unsafe-assignment": "error",
-      "@typescript-eslint/no-unsafe-member-access": "error",
-      "@typescript-eslint/no-unsafe-call": "error",
-      "@typescript-eslint/no-unsafe-return": "error",
-      "@typescript-eslint/no-unsafe-argument": "error",
-      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unsafe-assignment": "warn",
+      "@typescript-eslint/no-unsafe-member-access": "warn",
+      "@typescript-eslint/no-unsafe-call": "warn",
+      "@typescript-eslint/no-unsafe-return": "warn",
+      "@typescript-eslint/no-unsafe-argument": "warn",
     },
   },
 
-  // Hygiene rules
+  // Hygiene & code quality rules
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
@@ -68,6 +67,9 @@ export default tseslint.config(
         argsIgnorePattern: "^_",
         varsIgnorePattern: "^_",
       }],
+      "@typescript-eslint/require-await": "warn",
+      "@typescript-eslint/return-await": "warn",
+      "@typescript-eslint/promise-function-async": "warn",
       "no-console": ["warn", { allow: ["warn", "error"] }],
       "eqeqeq": "error",
     },

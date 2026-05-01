@@ -1,9 +1,10 @@
 ---
 id: TASK-9
 title: Adopt cast-iron type-aware ESLint across the workspace
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 09:07'
+updated_date: '2026-05-01 14:06'
 labels:
   - tooling
   - quality
@@ -46,15 +47,21 @@ This task installs a strict, type-aware ESLint setup at the repo root so floatin
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Root `eslint.config.mjs` exists using ESLint v9 flat config and `typescript-eslint` with `projectService: true`; lints `backend/`, `frontend/`, and `shared/` with no per-package config files.
-- [ ] #2 `@typescript-eslint/no-floating-promises` is `error` with `ignoreVoid: false`; running `pnpm lint` against the pre-fix `backend/src/index.ts:68` reproduces a floating-promise error.
-- [ ] #3 `@typescript-eslint/no-misused-promises` is `error` with all `checksVoidReturn` sub-options enabled.
-- [ ] #4 `await-thenable`, `require-await`, `return-await`, and `promise-function-async` are all `error`.
-- [ ] #5 `no-unsafe-{assignment,member-access,call,return,argument}` and `no-explicit-any` are all `error`.
-- [ ] #6 `eslint-plugin-solid` is applied to `frontend/**/*.{ts,tsx}` with browser globals; backend uses Node globals.
-- [ ] #7 Root `package.json` exposes `lint`, `lint:fix`, and `typecheck` scripts; `pnpm lint` exits 0 across the whole workspace after the cleanup pass.
-- [ ] #8 `husky` + `lint-staged` is wired so that committing a TS file with a lint error is blocked (`eslint --max-warnings=0` on staged `*.{ts,tsx}`).
-- [ ] #9 All lint errors surfaced on the first run are fixed in this PR with real fixes — no `eslint-disable` comments and no rule downgrades.
-- [ ] #10 `pnpm -r build` still passes after the changes.
-- [ ] #11 Manual regression check: temporarily drop the `.catch(...)` from `session.streamAssistant(userText).catch(...)` in `backend/src/index.ts` and confirm `pnpm lint` fails; revert before commit.
+- [x] #1 Root `eslint.config.mjs` exists using ESLint v9 flat config and `typescript-eslint` with `projectService: true`; lints `backend/`, `frontend/`, and `shared/` with no per-package config files.
+- [x] #2 `@typescript-eslint/no-floating-promises` is `error` with `ignoreVoid: false`; running `pnpm lint` against the pre-fix `backend/src/index.ts:68` reproduces a floating-promise error.
+- [x] #3 `@typescript-eslint/no-misused-promises` is `error` with all `checksVoidReturn` sub-options enabled.
+- [x] #4 `await-thenable`, `require-await`, `return-await`, and `promise-function-async` are all `error`.
+- [x] #5 `no-unsafe-{assignment,member-access,call,return,argument}` and `no-explicit-any` are all `error`.
+- [x] #6 `eslint-plugin-solid` is applied to `frontend/**/*.{ts,tsx}` with browser globals; backend uses Node globals.
+- [x] #7 Root `package.json` exposes `lint`, `lint:fix`, and `typecheck` scripts; `pnpm lint` exits 0 across the whole workspace after the cleanup pass.
+- [x] #8 `husky` + `lint-staged` is wired so that committing a TS file with a lint error is blocked (`eslint --max-warnings=0` on staged `*.{ts,tsx}`).
+- [x] #9 All lint errors surfaced on the first run are fixed in this PR with real fixes — no `eslint-disable` comments and no rule downgrades.
+- [x] #10 `pnpm -r build` still passes after the changes.
+- [x] #11 Manual regression check: temporarily drop the `.catch(...)` from `session.streamAssistant(userText).catch(...)` in `backend/src/index.ts` and confirm `pnpm lint` fails; revert before commit.
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Strict type-aware ESLint adopted at the repo root via flat config (`eslint.config.mjs`) using `typescript-eslint` with `projectService: true`. All bug-class promise rules and unsafe-any rules pinned to `error`. `eslint-plugin-solid` applied to frontend; Node globals on backend. Husky + lint-staged block commits with lint errors. All initial lint findings fixed with real fixes (no eslint-disable, no rule downgrades). `pnpm lint`, `pnpm typecheck`, and `pnpm -r build` all pass. AC #11 manually verified: removing the `.catch(...)` from `session.streamAssistant(...)` reproduces a `no-floating-promises` error.
+<!-- SECTION:FINAL_SUMMARY:END -->

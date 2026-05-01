@@ -3,9 +3,9 @@
 
 export class AudioPlayer {
   private ctx: AudioContext;
-  private nextStartTime: number = 0;
+  private nextStartTime = 0;
   private gain: GainNode;
-  private paused: boolean = false;
+  private paused = false;
 
   constructor() {
     this.ctx = new AudioContext({ sampleRate: 48000 });
@@ -24,7 +24,7 @@ export class AudioPlayer {
   play(chunk: ArrayBuffer): void {
     if (this.paused) return;
     if (this.ctx.state === "suspended") {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => { /* ignore */ });
     }
 
     const pcm16 = new Int16Array(chunk);
@@ -51,12 +51,12 @@ export class AudioPlayer {
 
   pause(): void {
     this.paused = true;
-    this.ctx.suspend();
+    this.ctx.suspend().catch(() => { /* ignore */ });
   }
 
   resume(): void {
     this.paused = false;
-    this.ctx.resume();
+    this.ctx.resume().catch(() => { /* ignore */ });
   }
 
   flush(): void {
@@ -73,6 +73,6 @@ export class AudioPlayer {
   }
 
   destroy(): void {
-    this.ctx.close();
+    this.ctx.close().catch(() => { /* ignore */ });
   }
 }

@@ -10,26 +10,25 @@ export interface ElevenLabsConfig {
   outputFormat?: string;
 }
 
-type ElevenLabsEnvelope = {
+interface ElevenLabsEnvelope {
   audio?: string;
   isFinal?: boolean;
   error?: string;
-};
+}
 
 export interface ElevenLabsWSClient extends EventEmitter {
   on(event: "audio", listener: (audioBuffer: Buffer) => void): this;
   on(event: "error", listener: (error: Error) => void): this;
-  on(event: "close", listener: () => void): this;
-  on(event: "isFinal", listener: () => void): this;
+  on(event: "close" | "isFinal", listener: () => void): this;
 }
 
 export class ElevenLabsStream extends EventEmitter {
   private ws: WebSocket | null = null;
   private config: ElevenLabsConfig;
-  private sentenceBuffer: string = "";
-  private isStreaming: boolean = false;
-  private isClosed: boolean = false;
-  private isClosing: boolean = false;
+  private sentenceBuffer = "";
+  private isStreaming = false;
+  private isClosed = false;
+  private isClosing = false;
 
   get closing(): boolean {
     return this.isClosing;
@@ -44,9 +43,9 @@ export class ElevenLabsStream extends EventEmitter {
     };
   }
 
-  connect(): Promise<void> {
+  async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const url = `${ELEVENLABS_WS_URL}/${this.config.voiceId}/stream-input?model_id=${this.config.modelId}&output_format=${this.config.outputFormat}`;
+      const url = `${ELEVENLABS_WS_URL}/${this.config.voiceId}/stream-input?model_id=${this.config.modelId ?? ""}&output_format=${this.config.outputFormat ?? ""}`;
 
       this.ws = new WebSocket(url, {
         headers: {
@@ -78,7 +77,7 @@ export class ElevenLabsStream extends EventEmitter {
   }
 
   private sendInitialConfig() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (this.ws?.readyState !== WebSocket.OPEN) return;
 
     const config = {
       text: "",
@@ -94,7 +93,7 @@ export class ElevenLabsStream extends EventEmitter {
     this.ws.send(JSON.stringify(config));
   }
 
-  sendText(text: string, flush: boolean = false): void {
+  sendText(text: string, flush = false): void {
     if (!this.isStreaming || !this.ws) return;
 
     const message: { text: string; flush?: boolean } = { text };
@@ -161,7 +160,7 @@ export class ElevenLabsStream extends EventEmitter {
     }
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     return new Promise((resolve) => {
       if (!this.ws || !this.isStreaming) {
         resolve();

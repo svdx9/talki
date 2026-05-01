@@ -1,5 +1,6 @@
-import { Component, createSignal, onCleanup, onMount } from "solid-js";
-import { ClientMsg, ServerMsg } from "talki-shared";
+import type { Component} from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
+import type { ClientMsg, ServerMsg } from "talki-shared";
 import { AudioPlayer } from "./audio-player";
 
 const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/ws`;
@@ -26,7 +27,7 @@ const App: Component = () => {
 
     ws.onmessage = (event) => {
       if (typeof event.data === "string") {
-        const msg: ServerMsg = JSON.parse(event.data);
+        const msg = JSON.parse(event.data) as ServerMsg;
 
         if (msg.type === "session_ready") {
           setSessionReady(true);
@@ -59,6 +60,8 @@ const App: Component = () => {
           if (player && buf.byteLength > 0) {
             player.play(buf);
           }
+        }).catch(() => {
+          // ignore
         });
       }
     };
@@ -74,7 +77,7 @@ const App: Component = () => {
   };
 
   const startSession = () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (ws?.readyState !== WebSocket.OPEN) return;
     player = new AudioPlayer();
     setTranscript("");
     setAssistantText("");
@@ -93,16 +96,18 @@ const App: Component = () => {
         audioChunks.push(e.data);
         // Send raw audio chunk to backend
         e.data.arrayBuffer().then((buf) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
+          if (ws?.readyState === WebSocket.OPEN) {
             ws.send(buf);
           }
+        }).catch(() => {
+          // ignore
         });
       }
     };
 
     mediaRecorder.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      stream.getTracks().forEach((t) => { t.stop(); });
+      if (ws?.readyState === WebSocket.OPEN) {
         const msg: ClientMsg = { type: "end_utterance" };
         ws.send(JSON.stringify(msg));
       }
@@ -121,7 +126,9 @@ const App: Component = () => {
     if (isRecording()) {
       stopRecording();
     } else {
-      startRecording();
+      startRecording().catch(() => {
+        // ignore
+      });
     }
   };
 

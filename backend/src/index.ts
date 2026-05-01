@@ -1,14 +1,15 @@
 import { Hono } from "hono";
 import { createServer } from "http";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { WebSocketServer, WebSocket } from "ws";
+import type { WebSocket } from "ws";
+import { WebSocketServer } from "ws";
 import { loadConfig } from "./config.js";
-import { loadSkills, type Skill as SkillType } from "./skills/loader.js";
+import { loadSkills } from "./skills/loader.js";
 import { Session } from "./session.js";
-import type { ClientMsg, ServerMsg } from "talki-shared";
+import type { ClientMsg } from "talki-shared";
 
 const skills = loadSkills();
-console.log(`Loaded ${skills.length} skill(s): ${skills.map((s) => s.id).join(", ")}`);
+console.warn(`Loaded ${String(skills.length)} skill(s): ${skills.map((s) => s.id).join(", ")}`);
 
 const app = new Hono();
 const sessions = new Map<string, Session>();
@@ -27,13 +28,22 @@ const config = loadConfig();
 const port = config.PORT;
 
 const server = createServer((req, res) => {
-  app.fetch(req as any, res as any);
+  const handle = async () => {
+    try {
+      await app.fetch(req as unknown as Request, res);
+    } catch {
+      // ignore
+    }
+  };
+  handle().catch(() => {
+    // ignore
+  });
 });
 
 const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (request, socket, head) => {
-  const url = new URL(request.url || "", `http://${request.headers.host}`);
+  const url = new URL(request.url ?? "", `http://${request.headers.host ?? ""}`);
   if (url.pathname === "/api/ws") {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit("connection", ws, request);
@@ -49,14 +59,16 @@ wss.on("connection", (ws: WebSocket) => {
   sessions.set(sessionId, session);
   session.initAnthropic(config.ANTHROPIC_API_KEY);
 
-  console.log(`Session ${sessionId} connected`);
+  console.warn(`Session ${sessionId} connected`);
 
-  ws.on("message", async (data) => {
+  ws.on("message", (data) => {
     if (typeof data === "string") {
       try {
-        const msg: ClientMsg = JSON.parse(data);
-        await handleClientMessage(session, msg);
-      } catch (e) {
+        const msg = JSON.parse(data) as ClientMsg;
+        handleClientMessage(session, msg).catch(() => {
+          // ignore
+        });
+      } catch {
         session.send({ type: "error", message: "Invalid message format" });
       }
     } else if (data instanceof Buffer || data instanceof ArrayBuffer) {
@@ -64,16 +76,20 @@ wss.on("connection", (ws: WebSocket) => {
     }
   });
 
-  ws.on("close", async (code: number, reason: Buffer<ArrayBufferLike>) => {
-    await session.closeDeepgram();
+  ws.on("close", (code: number, reason: Buffer) => {
+    session.closeDeepgram().catch(() => {
+      // ignore
+    });
     sessions.delete(sessionId);
-    console.log(`Session ${sessionId} disconnected: code ${code}, reason ${reason}`);
+    console.warn(`Session ${sessionId} disconnected: code ${String(code)}, reason ${String(reason)}`);
   });
 
-  ws.on("error", async (error: Error) => {
-    await session.closeDeepgram();
+  ws.on("error", (error: Error) => {
+    session.closeDeepgram().catch(() => {
+      // ignore
+    });
     sessions.delete(sessionId);
-    console.log(`Session ${sessionId} error: ${error}`);
+    console.warn(`Session ${sessionId} error: ${error}`);
   });
 });
 
@@ -90,7 +106,7 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
 
     try {
       await session.connectDeepgram(config);
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(`Deepgram connection error for session ${session.id}:`, e);
       session.send({ type: "error", message: "Failed to connect to speech service" });
       return;
@@ -101,7 +117,7 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
         apiKey: config.ELEVENLABS_API_KEY,
         voiceId: scenario.voice,
       });
-    } catch (e) {
+    } catch (e: unknown) {
       console.error(`ElevenLabs connection error for session ${session.id}:`, e);
       session.send({ type: "error", message: "Failed to connect to voice service" });
       return;
@@ -119,12 +135,12 @@ async function handleClientMessage(session: Session, msg: ClientMsg) {
     const userText = session.transcript.trim();
     session.clearTranscript();
     if (userText) {
-      session.streamAssistant(userText).catch((err) => {
+      void session.streamAssistant(userText).catch((err: unknown) => {
         console.error(`Assistant stream error for session ${session.id}:`, err);
       });
     }
   }
 }
 
-console.log(`Server starting on port ${port}...`);
+console.warn(`Server starting on port ${String(port)}...`);
 server.listen(port);

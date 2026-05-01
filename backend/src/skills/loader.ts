@@ -2,7 +2,8 @@ import { readdirSync, readFileSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import yaml from "js-yaml";
-import { SkillSchema, Skill } from "./schema.js";
+import type { Skill } from "./schema.js";
+import { SkillSchema } from "./schema.js";
 
 export type { Skill };
 
@@ -28,7 +29,7 @@ export function loadSkills(): Skill[] {
     try {
       parsed = yaml.load(content);
     } catch (e) {
-      throw new Error(`Failed to parse YAML file ${file}: ${e}`);
+      throw new Error(`Failed to parse YAML file ${file}: ${(e as Error).message}`);
     }
 
     const result = SkillSchema.safeParse(parsed);

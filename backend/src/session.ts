@@ -11,12 +11,12 @@ export class Session {
   id: string;
   ws: WebSocket;
   scenario: Skill | null = null;
-  transcript: string = "";
+  transcript = "";
   createdAt: Date;
   private dgSocket: DgSocket | null = null;
   private anthropic: Anthropic | null = null;
   private elevenLabsStream: ElevenLabsStream | null = null;
-  private conversationHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
+  private conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
 
   constructor(id: string, ws: WebSocket) {
     this.id = id;
@@ -95,7 +95,7 @@ export class Session {
     this.dgSocket.on("message", (msg) => {
       if ((msg as { type?: string }).type !== "Results") return;
       const results = msg as {
-        channel?: { alternatives?: Array<{ transcript?: string }> };
+        channel?: { alternatives?: { transcript?: string }[] };
         is_final?: boolean;
       };
       const text = results.channel?.alternatives?.[0]?.transcript;
@@ -111,11 +111,11 @@ export class Session {
 
     this.dgSocket.connect();
     await this.dgSocket.waitForOpen();
-    console.log(`Deepgram connected for session ${this.id}`);
+    console.warn(`Deepgram connected for session ${this.id}`);
   }
 
   pushClientAudio(data: Buffer | ArrayBuffer) {
-    this.dgSocket?.sendMedia(data as Buffer | ArrayBuffer);
+    this.dgSocket?.sendMedia(data);
   }
 
   endUtterance() {
@@ -162,7 +162,7 @@ export class Session {
     try {
       const finalMessage = await stream.finalMessage();
       const textContent = finalMessage.content.find((b) => b.type === "text");
-      if (textContent && textContent.type === "text") {
+      if (textContent?.type === "text") {
         this.conversationHistory.push({ role: "assistant", content: textContent.text });
       }
       this.flushElevenLabs();

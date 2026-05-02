@@ -1,8 +1,7 @@
 import type { Skill } from "./skills/schema.js";
 import { WebSocket } from "ws";
 import Anthropic from "@anthropic-ai/sdk";
-import { Mistral } from "@mistralai/mistralai";
-import { createRealtimeClient, transcribeStream, AudioEncoding, type AudioFormat } from "./integrations/mistral-realtime.js";
+import { connectRealtimeStt, AudioEncoding, type AudioFormat, type RealtimeStt } from "./integrations/mistral-realtime.js";
 
 const MISTRAL_TTS_URL = "https://api.mistral.ai/v1/audio/speech";
 
@@ -14,11 +13,10 @@ export class Session {
   utteranceOpen = false;
   createdAt: Date;
   private anthropic: Anthropic | null = null;
-   private mistral: Mistral | null = null;
-   private realtimeClient: unknown = null;
-  private sttController: ReadableStreamDefaultController<Uint8Array> | null = null;
-  private sttStreamDone = false;
+  private stt: RealtimeStt | null = null;
+  private sttBytesPushed = 0;
   private conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
+  private assistantAbort: AbortController | null = null;
 
   constructor(id: string, ws: WebSocket) {
     this.id = id;
@@ -49,83 +47,104 @@ export class Session {
     this.anthropic = new Anthropic({ apiKey });
   }
 
-   initMistral(config: { apiKey: string; voiceId: string }) {
-     this.mistral = new Mistral({ apiKey: config.apiKey });
-     this.realtimeClient = createRealtimeClient(config.apiKey);
-   }
+  startVoxtralSTT(config: { apiKey: string; voiceId: string; sampleRate: number }): void {
+    console.warn(`Session ${this.id}: starting Voxtral STT at ${String(config.sampleRate)} Hz...`);
+    const audioFormat: AudioFormat = {
+      encoding: AudioEncoding.PcmS16le,
+      sampleRate: config.sampleRate,
+    };
 
-   private asyncSttStream(): ReadableStream<Uint8Array> {
-     return new ReadableStream<Uint8Array>({
-       pull: (controller) => {
-         if (this.sttStreamDone) {
-           controller.close();
-         }
-       },
-       cancel: () => {
-         this.sttController = null;
-       },
-       start: (controller) => {
-         this.sttController = controller;
-       },
-     });
-   }
+    void (async () => {
+      try {
+        const stt = await connectRealtimeStt(config.apiKey, "voxtral-mini-transcribe-realtime-2602", audioFormat);
+        this.stt = stt;
+        console.warn(`Session ${this.id}: Voxtral STT connected`);
 
-   startVoxtralSTT(config: { apiKey: string; voiceId: string }): void {
-     this.initMistral(config);
-     console.warn(`Session ${this.id}: starting Voxtral STT...`);
+        for await (const event of stt.events()) {
+          console.warn(`Session ${this.id}: STT event ${event.type}`);
+          if (event.type === "transcription.text.delta") {
+            const text = (event as { text?: string }).text ?? "";
+            console.warn(`Session ${this.id}: transcript delta ${JSON.stringify(text)}`);
+            this.appendTranscript(text);
+            this.send({ type: "transcript", text, isFinal: false });
+          } else if (event.type === "transcription.segment.delta") {
+            const text = (event as { text?: string }).text ?? "";
+            if (text) {
+              console.warn(`Session ${this.id}: transcript segment ${JSON.stringify(text)}`);
+              this.appendTranscript(text);
+              this.send({ type: "transcript", text, isFinal: false });
+            }
+          } else if (event.type === "transcription.done") {
+            console.warn(`Session ${this.id}: transcript final ${JSON.stringify(this.transcript)}`);
+            this.send({ type: "transcript", text: "", isFinal: true });
+          } else if (event.type === "error") {
+            const errMsg = (event as { error?: { message?: unknown } }).error?.message;
+            const msg = typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg);
+            // Voxtral emits a spurious "Cannot flush audio before sending any audio bytes"
+            // event right after session start; keep the connection alive when it appears.
+            if (msg.includes("Cannot flush audio before sending any audio bytes")) {
+              console.warn(`Session ${this.id}: Voxtral STT spurious flush ignored`);
+              continue;
+            }
+            console.error(`Session ${this.id}: Voxtral STT error — ${msg}`);
+            this.send({ type: "error", message: `STT error: ${msg}` });
+          }
+          if (stt.isClosed) break;
+        }
+      } catch (err: unknown) {
+        console.error(`Session ${this.id}: Voxtral STT stream error:`, err);
+        this.send({ type: "error", message: "STT stream error" });
+      }
+    })();
+  }
 
-     const audioStream = this.asyncSttStream();
-     const audioFormat: AudioFormat = {
-       encoding: AudioEncoding.PcmS16le,
-       sampleRate: 16000,
-     };
-
-       void (async () => {
-         try {
-           if (!this.realtimeClient) return;
-           for await (const event of transcribeStream(this.realtimeClient, audioStream, "voxtral-mini-transcribe-realtime-2602", audioFormat)) {
-             if (event.type === "transcription.text.delta") {
-               this.send({ type: "transcript", text: event.text, isFinal: false });
-             } else if (event.type === "transcription.done") {
-               this.send({ type: "transcript", text: "", isFinal: true });
-               break;
-             } else if (event.type === "error") {
-               const errMsg = (event as { error?: { message?: unknown } }).error?.message;
-               const msg = typeof errMsg === "string" ? errMsg : JSON.stringify(errMsg);
-               console.error(`Session ${this.id}: Voxtral STT error — ${msg}`);
-               this.send({ type: "error", message: `STT error: ${msg}` });
-               break;
-             }
-           }
-         } catch (err: unknown) {
-           console.error(`Session ${this.id}: Voxtral STT stream error:`, err);
-           this.send({ type: "error", message: "STT stream error" });
-         }
-       })();
-
-     console.warn(`Session ${this.id}: Voxtral STT started`);
-   }
+  private utterancePeak = 0;
 
   pushClientAudio(data: Buffer | ArrayBuffer): void {
-    if (!this.sttController || this.sttStreamDone) return;
-    const uint8 = new Uint8Array(data instanceof Buffer ? data : new Uint8Array(data));
-    this.sttController.enqueue(uint8);
+    if (!this.stt || this.stt.isClosed) return;
+    const uint8 = data instanceof Buffer
+      ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      : new Uint8Array(data);
+    if (uint8.byteLength === 0) return;
+    const samples = new Int16Array(uint8.buffer, uint8.byteOffset, Math.floor(uint8.byteLength / 2));
+    let peak = 0;
+    for (const s of samples) {
+      const v = Math.abs(s);
+      if (v > peak) peak = v;
+    }
+    if (peak > this.utterancePeak) this.utterancePeak = peak;
+    this.sttBytesPushed += uint8.byteLength;
+    this.stt.sendAudio(uint8).catch((err: unknown) => {
+      console.error(`Session ${this.id}: STT sendAudio error:`, err);
+    });
   }
 
   endUtterance(): void {
-    if (!this.sttController || this.sttStreamDone) return;
-    this.sttStreamDone = true;
-    this.sttController.close();
-    this.sttController = null;
+    if (!this.stt || this.stt.isClosed) return;
+    if (this.sttBytesPushed === 0) {
+      console.warn(`Session ${this.id}: end_utterance with no audio — skipping flush`);
+      return;
+    }
+    const peakDb = this.utterancePeak > 0 ? 20 * Math.log10(this.utterancePeak / 32768) : -Infinity;
+    console.warn(`Session ${this.id}: utterance peak=${String(this.utterancePeak)} (${peakDb.toFixed(1)} dBFS), bytes=${String(this.sttBytesPushed)}`);
+    this.sttBytesPushed = 0;
+    this.utterancePeak = 0;
+    this.stt.flushAudio().catch((err: unknown) => {
+      console.error(`Session ${this.id}: STT flushAudio error:`, err);
+    });
   }
 
-   closeVoxtral(): void {
-     this.sttStreamDone = true;
-     this.sttController?.close();
-     this.sttController = null;
-     this.realtimeClient = null;
-     this.mistral = null;
-   }
+  closeVoxtral(): void {
+    const stt = this.stt;
+    this.stt = null;
+    this.sttBytesPushed = 0;
+    if (!stt) return;
+    stt.endAudio()
+      .catch(() => undefined)
+      .finally(() => {
+        stt.close().catch(() => undefined);
+      });
+  }
 
   async sendToVoxtral(text: string): Promise<void> {
     if (!this.scenario) return;
@@ -147,28 +166,28 @@ export class Session {
         }),
       });
 
-       if (!response.ok) {
-         const body = await response.text();
-         console.error(`Session ${this.id}: Voxtral TTS HTTP ${String(response.status)}: ${body}`);
-         return;
-       }
+      if (!response.ok) {
+        const body = await response.text();
+        console.error(`Session ${this.id}: Voxtral TTS HTTP ${String(response.status)}: ${body}`);
+        return;
+      }
 
-       const body = response.body;
-       if (!body) return;
+      const body = response.body;
+      if (!body) return;
 
-       const reader = body.getReader();
-       try {
-         let chunk = await reader.read();
-         while (!chunk.done) {
-           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-           if (chunk.value) {
-             this.ws.send(chunk.value);
-           }
-           chunk = await reader.read();
-         }
-       } finally {
-         reader.releaseLock();
-       }
+      const reader = body.getReader();
+      try {
+        let chunk = await reader.read();
+        while (!chunk.done) {
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (chunk.value) {
+            this.ws.send(chunk.value);
+          }
+          chunk = await reader.read();
+        }
+      } finally {
+        reader.releaseLock();
+      }
     } catch (err: unknown) {
       console.error(`Session ${this.id}: Voxtral TTS error:`, err);
     }
@@ -188,25 +207,32 @@ export class Session {
       },
     ];
 
-    const stream = this.anthropic.messages.stream({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: this.conversationHistory.map(({ role, content }) => ({
-        role,
-        content,
-      })),
-    });
+    this.assistantAbort?.abort();
+    const abort = new AbortController();
+    this.assistantAbort = abort;
+
+    const stream = this.anthropic.messages.stream(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: this.conversationHistory.map(({ role, content }) => ({
+          role,
+          content,
+        })),
+      },
+      { signal: abort.signal },
+    );
 
     let fullText = "";
 
-     stream.on("text", (delta) => {
-       this.send({ type: "assistant_text_delta", text: delta });
-       fullText += delta;
-       this.sendToVoxtral(delta).catch((err: unknown) => {
-         console.error(`Session ${this.id}: TTS error:`, err);
-       });
-     });
+    stream.on("text", (delta) => {
+      this.send({ type: "assistant_text_delta", text: delta });
+      fullText += delta;
+      this.sendToVoxtral(delta).catch((err: unknown) => {
+        console.error(`Session ${this.id}: TTS error:`, err);
+      });
+    });
 
     try {
       const finalMessage = await stream.finalMessage();
@@ -216,7 +242,18 @@ export class Session {
       }
       this.send({ type: "assistant_done", fullText });
     } catch (err) {
-      console.error(`Anthropic stream error for session ${this.id}:`, err);
+      if (abort.signal.aborted) {
+        console.warn(`Session ${this.id}: assistant stream cancelled`);
+      } else {
+        console.error(`Anthropic stream error for session ${this.id}:`, err);
+      }
+    } finally {
+      if (this.assistantAbort === abort) this.assistantAbort = null;
     }
+  }
+
+  cancelAssistant(): void {
+    this.assistantAbort?.abort();
+    this.assistantAbort = null;
   }
 }

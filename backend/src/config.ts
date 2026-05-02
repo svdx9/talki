@@ -13,6 +13,7 @@ const configSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1, "Anthropic API key required"),
   MISTRAL_VOICE_ID: z.string().default("female-1"),
   PORT: z.coerce.number().default(8787),
+  DEBUG_WS: z.coerce.boolean().default(false),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -23,6 +24,7 @@ export function loadConfig(): Config {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     MISTRAL_VOICE_ID: process.env.MISTRAL_VOICE_ID,
     PORT: process.env.PORT,
+    DEBUG_WS: process.env.DEBUG_WS,
   };
 
   return configSchema.parse(env);

@@ -37,7 +37,8 @@ try {
 const port = config.PORT;
 console.warn(
   `Config loaded: MISTRAL=${config.MISTRAL_API_KEY ? "set" : "missing"} ` +
-  `ANTHROPIC=${config.ANTHROPIC_API_KEY ? "set" : "missing"}`
+  `ANTHROPIC=${config.ANTHROPIC_API_KEY ? "set" : "missing"}` +
+  `PORT=${String(port)} DEBUG_WS=${String(config.DEBUG_WS)}`,
 );
 
 const server = serve({ fetch: app.fetch, port });
@@ -65,6 +66,11 @@ wss.on("connection", (ws: WebSocket) => {
   console.warn(`Session ${sessionId} connected`);
 
   ws.on("message", (data: Buffer, isBinary: boolean) => {
+    if (config.DEBUG_WS) {
+      console.warn(
+        `Session ${sessionId} <- ${isBinary ? "binary" : "text"} frame, ${String(data.byteLength)} bytes`,
+      );
+    }
     if (isBinary) {
       if (!session.utteranceOpen) {
         session.send({
@@ -83,40 +89,40 @@ wss.on("connection", (ws: WebSocket) => {
       session.send({ type: "error", message: "Invalid message format" });
       return;
     }
-     console.warn(`Session ${sessionId} <- ${msg.type}`);
-     try {
-       handleClientMessage(session, msg);
-     } catch (err: unknown) {
-       console.error(`Session ${sessionId} handler error for ${msg.type}:`, err);
-       session.send({
-         type: "error",
-         message: err instanceof Error ? err.message : "Handler failed",
-       });
-     }
+    console.warn(`Session ${sessionId} <- ${msg.type}`);
+    try {
+      handleClientMessage(session, msg);
+    } catch (err: unknown) {
+      console.error(`Session ${sessionId} handler error for ${msg.type}:`, err);
+      session.send({
+        type: "error",
+        message: err instanceof Error ? err.message : "Handler failed",
+      });
+    }
   });
 
-   ws.on("close", (code: number, reason: Buffer) => {
-     session.closeVoxtral();
-     sessions.delete(sessionId);
-     console.warn(`Session ${sessionId} disconnected: code ${String(code)}, reason ${String(reason)}`);
-   });
+  ws.on("close", (code: number, reason: Buffer) => {
+    session.closeVoxtral();
+    sessions.delete(sessionId);
+    console.warn(`Session ${sessionId} disconnected: code ${String(code)}, reason ${String(reason)}`);
+  });
 
-   ws.on("error", (error: Error) => {
-     session.closeVoxtral();
-     sessions.delete(sessionId);
-     console.warn(`Session ${sessionId} error: ${error}`);
-   });
+  ws.on("error", (error: Error) => {
+    session.closeVoxtral();
+    sessions.delete(sessionId);
+    console.warn(`Session ${sessionId} error: ${error}`);
+  });
 });
 
 function _describeUpstreamError(e: unknown): string {
-   const raw = extractErrorText(e);
-   const status = /\b(\d{3})\b/.exec(raw)?.[1];
-   if (status === "401" || status === "403") return "authentication failed (check API key)";
-   if (status === "429") return "rate limited";
-   if (status && /^5\d\d$/.test(status)) return `upstream ${status}`;
-   return "service error";
- }
- 
+  const raw = extractErrorText(e);
+  const status = /\b(\d{3})\b/.exec(raw)?.[1];
+  if (status === "401" || status === "403") return "authentication failed (check API key)";
+  if (status === "429") return "rate limited";
+  if (status && /^5\d\d$/.test(status)) return `upstream ${status}`;
+  return "service error";
+}
+
 function extractErrorText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (typeof e === "string") return e;
@@ -145,52 +151,91 @@ function extractErrorText(e: unknown): string {
   return String(e);
 }
 
-function handleClientMessage(session: Session, msg: ClientMsg) {
-   if (msg.type === "start_session") {
-     const scenario = skills.find((s) => s.id === msg.scenarioId);
-     if (!scenario) {
-       session.send({ type: "error", message: "Scenario not found" });
-       return;
-     }
-
-     session.setScenario(scenario);
-     session.clearTranscript();
-
-     session.startVoxtralSTT({
-       apiKey: config.MISTRAL_API_KEY,
-       voiceId: scenario.voice,
-     });
-
-     session.send({ type: "session_ready", greeting: scenario.opening_line });
-
-     session.sendToVoxtral(scenario.opening_line).catch((e: unknown) => {
-       console.error("TTS error:", e);
-     });
-   }
-
-  if (msg.type === "start_utterance") {
-    if (session.utteranceOpen) {
-      session.send({ type: "error", message: "Utterance already in progress" });
-      return;
-    }
-    session.utteranceOpen = true;
+function handleStartSession(session: Session, msg: Extract<ClientMsg, { type: "start_session" }>) {
+  const scenario = skills.find((s) => s.id === msg.scenarioId);
+  if (!scenario) {
+    session.send({ type: "error", message: "Scenario not found" });
     return;
   }
 
-  if (msg.type === "end_utterance") {
-    if (!session.utteranceOpen) {
-      session.send({ type: "error", message: "No utterance in progress" });
-      return;
-    }
+  session.closeVoxtral();
+  session.setScenario(scenario);
+  session.clearTranscript();
+
+  session.startVoxtralSTT({
+    apiKey: config.MISTRAL_API_KEY,
+    voiceId: scenario.voice,
+    sampleRate: msg.sampleRate,
+  });
+
+  session.send({ type: "session_ready", greeting: scenario.opening_line });
+
+  session.sendToVoxtral(scenario.opening_line).catch((e: unknown) => {
+    console.error("TTS error:", e);
+  });
+}
+
+function handleStartUtterance(session: Session) {
+  if (session.utteranceOpen) {
+    session.send({ type: "error", message: "Utterance already in progress" });
+    return;
+  }
+  session.utteranceOpen = true;
+}
+
+function handleEndSession(session: Session) {
+  session.cancelAssistant();
+  if (session.utteranceOpen) {
     session.utteranceOpen = false;
     session.endUtterance();
-    const userText = session.transcript.trim();
-    session.clearTranscript();
-    if (userText) {
-      void session.streamAssistant(userText).catch((err: unknown) => {
-        console.error(`Assistant stream error for session ${session.id}:`, err);
-      });
-    }
+  }
+  session.closeVoxtral();
+  session.clearTranscript();
+  session.scenario = null;
+}
+
+function handleCancel(session: Session) {
+  session.cancelAssistant();
+  if (session.utteranceOpen) {
+    session.utteranceOpen = false;
+    session.endUtterance();
+  }
+  session.clearTranscript();
+}
+
+function handleEndUtterance(session: Session) {
+  if (!session.utteranceOpen) {
+    session.send({ type: "error", message: "No utterance in progress" });
+    return;
+  }
+  session.utteranceOpen = false;
+  session.endUtterance();
+  const userText = session.transcript.trim();
+  session.clearTranscript();
+  if (userText) {
+    void session.streamAssistant(userText).catch((err: unknown) => {
+      console.error(`Assistant stream error for session ${session.id}:`, err);
+    });
+  }
+}
+
+function handleClientMessage(session: Session, msg: ClientMsg) {
+  switch (msg.type) {
+    case "start_session":
+      handleStartSession(session, msg);
+      return;
+    case "end_session":
+      handleEndSession(session);
+      return;
+    case "start_utterance":
+      handleStartUtterance(session);
+      return;
+    case "end_utterance":
+      handleEndUtterance(session);
+      return;
+    case "cancel":
+      handleCancel(session);
+      return;
   }
 }
 

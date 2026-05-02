@@ -5,7 +5,14 @@ import { ScenarioPicker } from "./scenario-picker";
 import { ChatWindow } from "./chat-window";
 import { OpusPlayer } from "./opus-player";
 
-const SAMPLE_RATE = 16000;
+const PREFERRED_SAMPLE_RATE = 16000;
+
+async function probeAudioSampleRate(): Promise<number> {
+  const ctx = new AudioContext({ sampleRate: PREFERRED_SAMPLE_RATE });
+  const rate = ctx.sampleRate;
+  await ctx.close();
+  return rate;
+}
 
 const App: Component = () => {
   const ws = createWsStore();
@@ -16,6 +23,8 @@ const App: Component = () => {
   let audioContext: AudioContext | null = null;
   let workletNode: AudioWorkletNode | null = null;
   let mediaStream: MediaStream | null = null;
+  let sessionSampleRate = PREFERRED_SAMPLE_RATE;
+  let micLogTimer: ReturnType<typeof setInterval> | null = null;
 
   const startAudioPlayer = () => {
     player = new OpusPlayer();
@@ -28,21 +37,40 @@ const App: Component = () => {
     setSelectedScenario(scenarioId);
     startAudioPlayer();
     ws.clearEntries();
-    ws.startSession(scenarioId);
+    void probeAudioSampleRate()
+      .then((rate) => {
+        sessionSampleRate = rate;
+        console.warn(`[App] AudioContext sample rate: ${String(rate)} Hz`);
+        ws.startSession(scenarioId, rate);
+      })
+      .catch((err: unknown) => {
+        console.error("AudioContext probe failed:", err);
+        ws.startSession(scenarioId, PREFERRED_SAMPLE_RATE);
+      });
   };
 
   const startRecording = async () => {
     if (!player) return;
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    audioContext = new AudioContext({ sampleRate: sessionSampleRate });
 
     await audioContext.audioWorklet.addModule(
       new URL("./pcm-processor.worklet.ts", import.meta.url).href
     );
 
     workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
+    let micBytes = 0;
+    let micChunks = 0;
+    micLogTimer = setInterval(() => {
+      console.warn("[mic] last 1s", { chunks: micChunks, bytes: micBytes });
+
+      micBytes = 0;
+      micChunks = 0;
+    }, 1000);
     workletNode.port.onmessage = (event: MessageEvent<{ buffer: ArrayBuffer }>) => {
       const uint8 = new Uint8Array(event.data.buffer);
+      micBytes += uint8.byteLength;
+      micChunks += 1;
       ws.sendAudioChunk(uint8.buffer);
     };
 
@@ -55,23 +83,27 @@ const App: Component = () => {
   };
 
   const stopRecording = () => {
+    if (micLogTimer) {
+      clearInterval(micLogTimer);
+      micLogTimer = null;
+    }
     if (workletNode) {
       workletNode.port.onmessage = null;
       workletNode.disconnect();
       workletNode = null;
     }
-     if (audioContext) {
-       void audioContext.close().catch((): void => {
-         // Silently ignore errors closing audio context
-       });
-       audioContext = null;
-     }
-     if (mediaStream) {
-       mediaStream.getTracks().forEach((t): void => {
-         t.stop();
-       });
-       mediaStream = null;
-     }
+    if (audioContext) {
+      void audioContext.close().catch((): void => {
+        // Silently ignore errors closing audio context
+      });
+      audioContext = null;
+    }
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((t): void => {
+        t.stop();
+      });
+      mediaStream = null;
+    }
     ws.endUtterance();
     setIsRecording(false);
   };

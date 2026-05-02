@@ -7,7 +7,8 @@
 //   window are protocol violations and the server replies with an `error`.
 
 export type ClientMsg =
-  | { type: "start_session"; scenarioId: string }
+  | { type: "start_session"; scenarioId: string; sampleRate: number }
+  | { type: "end_session" }
   | { type: "start_utterance" }
   | { type: "end_utterance" }
   | { type: "cancel" };

@@ -180,9 +180,9 @@ export function createWsStore() {
     }
   };
 
-  const startSession = (scenarioId: string) => {
+  const startSession = (scenarioId: string, sampleRate: number) => {
     setState({ entries: [], assistantText: "" });
-    send({ type: "start_session", scenarioId });
+    send({ type: "start_session", scenarioId, sampleRate });
   };
 
   const startUtterance = () => {

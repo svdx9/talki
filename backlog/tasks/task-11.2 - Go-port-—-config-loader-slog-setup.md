@@ -1,7 +1,7 @@
 ---
 id: TASK-11.2
 title: Go port — config loader + slog setup
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:55'
 labels:

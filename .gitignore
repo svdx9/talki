@@ -10,3 +10,6 @@ coverage/
 .claude/*
 .opencode/*
 .vscode/*
+backend-go/bin/
+backend-go/server
+

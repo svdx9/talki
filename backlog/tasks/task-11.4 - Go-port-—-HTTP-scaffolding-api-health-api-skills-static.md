@@ -25,11 +25,11 @@ Wire the two GET endpoints and static-file serving. No WebSocket yet (next task)
 - Handlers receive their dependencies via constructor injection on a `Server` struct. No package-level state.
 
 ## What to build
-- `backend-go/cmd/server/internal/server/server.go`:
+- `backend-go/internal/server/server.go`:
   - `type Server struct { cfg config.Config; skills []skills.Skill; log *slog.Logger; mux *http.ServeMux; httpSrv *http.Server }`
   - `func New(cfg config.Config, sk []skills.Skill, log *slog.Logger) *Server`
   - `func (s *Server) ListenAndServe() error` and `func (s *Server) Shutdown(ctx context.Context) error`.
-- `backend-go/cmd/server/internal/server/static.go`:
+- `backend-go/internal/server/static.go`:
   - Mounts `http.FileServer(http.Dir(...))` for `../frontend/dist` resolved to an absolute path at startup. If the directory does not exist, log a warning and continue (parity with current TS behavior of mounting unconditionally).
 - Routes:
   - `GET /api/health` → JSON `{"status":"ok","timestamp":"<RFC3339>"}`.

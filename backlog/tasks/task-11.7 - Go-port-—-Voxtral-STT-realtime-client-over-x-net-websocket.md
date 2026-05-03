@@ -46,7 +46,7 @@ Hand-rolled client for Mistral's realtime transcription WebSocket API, replacing
 After session.updated, Voxtral emits an `error` event with message containing `Cannot flush audio before sending any audio bytes`. **Drop it and continue.** Cite the cause in a code comment. Do NOT close the connection. See [backend/src/session.ts](backend/src/session.ts) for the equivalent comment text.
 
 ## What to build
-- `backend-go/cmd/server/internal/stt/voxtral.go`:
+- `backend-go/internal/stt/voxtral.go`:
 ```go
 type AudioFormat struct { Encoding string; SampleRate int }
 type Event struct { Type string; Text string; Raw json.RawMessage }

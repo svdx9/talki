@@ -38,7 +38,7 @@ Hand-rolled SSE client for Anthropic's Messages API. Replaces the official SDK u
 - Anything else → log at debug and ignore (forward-compatible).
 
 ## What to build
-- `backend-go/cmd/server/internal/llm/anthropic.go`:
+- `backend-go/internal/llm/anthropic.go`:
 ```go
 type Message struct { Role string; Content string }
 type Request struct { Model string; MaxTokens int; System string; Messages []Message }

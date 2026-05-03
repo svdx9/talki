@@ -26,12 +26,12 @@ Implement the per-session state machine. STT/TTS/Anthropic calls are stubbed in 
 - All goroutines tied to the session derive context from a single `context.Context` cancelled when the WS closes. To unblock the read loop on cancel, the writer goroutine (or a small watcher) calls `conn.SetReadDeadline(time.Now())` when ctx is cancelled.
 
 ## What to build
-- `backend-go/cmd/server/internal/session/session.go`:
+- `backend-go/internal/session/session.go`:
   - `type Session struct { id string; conn *websocket.Conn; cfg config.Config; skills []skills.Skill; log *slog.Logger; outgoing chan []byte; ctx context.Context; cancel context.CancelFunc; scenario *skills.Skill; transcript strings.Builder; utteranceOpen bool; convHistory []Message }`
   - `func New(...) *Session` constructor, all fields required at construction.
   - `func (s *Session) Run(parent context.Context) error` starts writer + read loops, waits for both to return, returns the first non-nil error.
   - `Send(msg any)` JSON-encodes `msg` and pushes onto `outgoing`.
-- `backend-go/cmd/server/internal/session/handlers.go`:
+- `backend-go/internal/session/handlers.go`:
   - `func (s *Session) handle(ctx context.Context, raw []byte) error` calls `protocol.DecodeClient`, type-switches, and dispatches to:
     - `handleStartSession(StartSession)` — validates scenario, sets `s.scenario`, clears transcript, sends `session_ready` (with `greeting = scenario.OpeningLine`). STT/TTS calls left as `// TODO(stt)` / `// TODO(tts)` stubs that log only.
     - `handleStartUtterance()` — error if already open; otherwise set true.

@@ -42,7 +42,7 @@ ServerMsg =
 ```
 
 ## What to build
-- `backend-go/cmd/server/internal/protocol/protocol.go`:
+- `backend-go/internal/protocol/protocol.go`:
   - `type RawClientMsg struct { Type string \`json:\"type\"\` }` for first-pass discriminator decoding.
   - One struct per ClientMsg variant (e.g. `StartSession{ ScenarioID string \`json:\"scenarioId\"\`; SampleRate int \`json:\"sampleRate\"\` }`). Note: TS uses camelCase, MUST be preserved in JSON tags.
   - One struct per ServerMsg variant with constructors (`NewSessionReady(greeting string)`, `NewTranscript(text string, final bool)`, etc.) so callers cannot forget required fields.
@@ -50,7 +50,7 @@ ServerMsg =
 - Round-trip JSON tests for every variant.
 
 ## WS upgrade
-- `backend-go/cmd/server/internal/server/ws.go`:
+- `backend-go/internal/server/ws.go`:
   - Use `websocket.Server{ Handshake: func(*websocket.Config, *http.Request) error { return nil }, Handler: ... }` to accept any Origin (frontend served from same host today).
   - Mount at `/api/ws` from `Server.New`.
   - The handler currently: generates a session ID (`crypto/rand` + base32, 6 chars lowercase), logs `session XXX connected`, blocks until the conn closes, logs `session XXX disconnected`.

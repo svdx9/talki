@@ -24,7 +24,7 @@ Bootstrap the Go module under `backend-go/`. Establishes the directory shape, bu
 ## Hard constraints (must read parent TASK-11)
 - WebSocket: `golang.org/x/net/websocket` ONLY (added now even though no WS handler is wired yet, so the dependency is captured).
 - Otherwise stdlib only.
-- All code lives under `backend-go/cmd/server/`. Feature subpackages live under `backend-go/cmd/server/internal/<feature>/`. There is no top-level `internal/` for now.
+- All code lives under `backend-go/cmd/server/`. Feature subpackages live under `backend-go/internal/<feature>/`. There is no top-level `internal/` for now.
 
 ## What to build
 - `backend-go/go.mod` (module path `github.com/svdx9/talki/backend-go`).

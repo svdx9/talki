@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/svdx9/talki/backend-go/cmd/server/internal/config"
+	"github.com/svdx9/talki/backend-go/internal/config"
 
 	_ "golang.org/x/net/websocket"
 )

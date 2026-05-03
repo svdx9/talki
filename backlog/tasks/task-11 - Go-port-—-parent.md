@@ -20,10 +20,10 @@ ordinal: 1000
 Tracking task for the Go port of the backend currently implemented in TypeScript at `backend/`. The new server is built incrementally under `backend-go/cmd/server/` while the TS backend keeps running. Only when every subtask is Done and parity is manually verified do we cut over and delete the TS backend.
 
 ## Hard constraints (apply to every subtask)
-- All Go code MUST live under `backend-go/cmd/server/` with feature subpackages under `backend-go/cmd/server/internal/<feature>/`. No top-level `internal/` and no `pkg/`. (We will reorganize to `/backend` only after cutover.)
+- All Go code MUST live under `backend-go/cmd/server/` with feature subpackages under `backend-go/internal/<feature>/`. No top-level `internal/` and no `pkg/`. (We will reorganize to `/backend` only after cutover.)
 - WebSocket (server accept + STT client dial) MUST use `golang.org/x/net/websocket`. No `gorilla/websocket`, no `nhooyr.io/websocket`, no `coder/websocket`.
 - Otherwise stdlib only. No chi, no pgx/sqlc, no oapi-codegen, no Anthropic SDK, no Mistral SDK, no YAML library, no dotenv loader.
-- Skill files (`backend/src/skills/catalog/*.yaml`) are converted **once** to JSON under `backend-go/cmd/server/internal/skills/catalog/*.json`. The YAML originals are removed at cutover.
+- Skill files (`backend/src/skills/catalog/*.yaml`) are converted **once** to JSON under `backend-go/internal/skills/catalog/*.json`. The YAML originals are removed at cutover.
 - Style follows the go-backend skill: explicit `err := f(); if err != nil` (no inline scoping), constructors over partial structs, contexts injected as the first parameter, `log/slog` for logging with `session_id` field, no global state.
 - WS write serialization: each session has one writer goroutine fed by a `chan []byte`; `*websocket.Conn` is not safe for concurrent writes.
 

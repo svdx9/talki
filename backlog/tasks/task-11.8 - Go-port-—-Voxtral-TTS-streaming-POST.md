@@ -28,7 +28,7 @@ Port the TTS path. Smallest of the upstream integrations.
 - Response: streaming MP3 bytes in the body.
 
 ## What to build
-- `backend-go/cmd/server/internal/tts/voxtral.go`:
+- `backend-go/internal/tts/voxtral.go`:
   - `func Stream(ctx context.Context, apiKey, voiceID, text string, sink io.Writer) error` — does the POST with `http.NewRequestWithContext`, on non-2xx returns a wrapped error including status + first 1KB of body, otherwise `io.Copy`s the body into `sink`.
 - The session passes a sink that wraps the writer-goroutine: every chunk written to the sink becomes a binary frame on the client WS (binary frames carry MP3 audio for the OpusPlayer in the browser).
 - `handleStartSession` triggers `tts.Stream(ctx, ..., scenario.OpeningLine, sink)` in a goroutine after sending `session_ready`. Errors logged but never crash the session.

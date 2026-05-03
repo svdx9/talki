@@ -21,7 +21,7 @@ ordinal: 3000
 Single-source config loader and structured logger. Mirrors `backend/src/config.ts` and the partial slog setup from the previous task.
 
 ## Hard constraints
-- All env-var reads MUST live in `backend-go/cmd/server/internal/config`. No `os.Getenv` outside this package.
+- All env-var reads MUST live in `backend-go/internal/config`. No `os.Getenv` outside this package.
 - No dotenv loader. The dev workflow may export env vars manually or via `direnv` — that is the operator's concern, not the binary's.
 - `Config` is constructed once in `main()` and passed down. No globals.
 
@@ -37,7 +37,7 @@ Single-source config loader and structured logger. Mirrors `backend/src/config.t
 | `ENV` | no | `dev` | reserved for future use |
 
 ## What to build
-- `backend-go/cmd/server/internal/config/config.go` exporting:
+- `backend-go/internal/config/config.go` exporting:
   - `type Config struct { ... }`
   - `func Load() (Config, error)` — reads env, validates, returns wrapped errors via `fmt.Errorf("config: %s: %w", field, err)`.
   - sentinel errors `ErrMissingMistralKey`, `ErrMissingAnthropicKey` so tests can use `errors.Is`.

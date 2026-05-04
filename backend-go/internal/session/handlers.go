@@ -8,30 +8,39 @@ import (
 )
 
 // handle decodes the raw client message and dispatches to the appropriate handler.
+// State-machine errors (invalid transitions) are sent as error ServerMsgs and return nil.
+// Decode errors or unhandled types are returned for logging.
 func (s *Session) handle(ctx context.Context, raw []byte) error {
 	msg, err := protocol.DecodeClient(raw)
 	if err != nil {
+		// Send decode error to client and log
+		s.Send(protocol.NewError(fmt.Sprintf("Decode error: %v", err)))
 		return fmt.Errorf("decode error: %w", err)
 	}
 
 	switch m := msg.(type) {
 	case *protocol.StartSession:
-		return s.handleStartSession(ctx, m)
+		s.handleStartSession(ctx, m)
+		return nil
 	case *protocol.StartUtterance:
-		return s.handleStartUtterance(ctx)
+		s.handleStartUtterance(ctx)
+		return nil
 	case *protocol.EndUtterance:
-		return s.handleEndUtterance(ctx)
+		s.handleEndUtterance(ctx)
+		return nil
 	case *protocol.EndSession:
-		return s.handleEndSession(ctx)
+		s.handleEndSession(ctx)
+		return nil
 	case *protocol.Cancel:
-		return s.handleCancel(ctx)
+		s.handleCancel(ctx)
+		return nil
 	default:
 		return fmt.Errorf("unhandled message type: %T", m)
 	}
 }
 
 // handleStartSession validates the scenario, sets it, clears transcript, and sends session_ready.
-func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSession) error {
+func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSession) {
 	s.log.Info("start_session", "session", s.id, "scenario", msg.ScenarioID, "sampleRate", msg.SampleRate)
 
 	// Validate scenario exists
@@ -40,7 +49,7 @@ func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSes
 		errMsg := fmt.Sprintf("Unknown scenario: %s", msg.ScenarioID)
 		s.log.Warn("unknown scenario", "session", s.id, "scenario", msg.ScenarioID)
 		s.Send(protocol.NewError(errMsg))
-		return nil
+		return
 	}
 
 	// Set the scenario and clear transcript
@@ -52,30 +61,30 @@ func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSes
 	// Send session_ready with opening line
 	s.Send(protocol.NewSessionReady(skill.OpeningLine))
 
-	// TODO(stt): Initialize STT with skill's voice and locale
-	// TODO(tts): Initialize TTS connection
+	// TODO(stt): Initialize STT with skill's voice, locale, and msg.SampleRate
+	// TODO(tts): Initialize TTS connection with skill's voice
 
 	s.log.Info("session started", "session", s.id, "scenario", skill.ID, "title", skill.Title)
-	return nil
 }
 
 // handleStartUtterance begins audio capture.
-// Returns an error ServerMsg if an utterance is already open.
-func (s *Session) handleStartUtterance(ctx context.Context) error {
+// Sends an error ServerMsg if an utterance is already open or if no scenario is active.
+func (s *Session) handleStartUtterance(ctx context.Context) {
 	s.log.Info("start_utterance", "session", s.id, "utteranceOpen", s.utteranceOpen)
 
 	if s.utteranceOpen {
 		errMsg := "Utterance already open"
 		s.log.Warn("double start_utterance", "session", s.id)
 		s.Send(protocol.NewError(errMsg))
-		return nil
+		return
 	}
 
+	// Defensive check: start_session must precede start_utterance.
 	if s.scenario == nil {
 		errMsg := "No active scenario; send start_session first"
 		s.log.Warn("start_utterance without scenario", "session", s.id)
 		s.Send(protocol.NewError(errMsg))
-		return nil
+		return
 	}
 
 	s.utteranceOpen = true
@@ -84,20 +93,19 @@ func (s *Session) handleStartUtterance(ctx context.Context) error {
 	// TODO(stt): Send audio to STT service
 
 	s.log.Info("utterance started", "session", s.id)
-	return nil
 }
 
 // handleEndUtterance closes the current audio capture.
-// Returns an error ServerMsg if no utterance is open.
+// Sends an error ServerMsg if no utterance is open.
 // The assistant response is left as a TODO(llm).
-func (s *Session) handleEndUtterance(ctx context.Context) error {
+func (s *Session) handleEndUtterance(ctx context.Context) {
 	s.log.Info("end_utterance", "session", s.id, "utteranceOpen", s.utteranceOpen)
 
 	if !s.utteranceOpen {
 		errMsg := "No open utterance to end"
 		s.log.Warn("end_utterance without start", "session", s.id)
 		s.Send(protocol.NewError(errMsg))
-		return nil
+		return
 	}
 
 	s.utteranceOpen = false
@@ -107,13 +115,11 @@ func (s *Session) handleEndUtterance(ctx context.Context) error {
 	s.log.Info("utterance closed", "session", s.id, "transcript", transcriptText)
 
 	// TODO(llm): Send transcript to Anthropic and stream response
-
-	return nil
 }
 
 // handleEndSession clears the session state.
 // No upstream effects yet (STT/TTS/LLM cleanup left for later).
-func (s *Session) handleEndSession(ctx context.Context) error {
+func (s *Session) handleEndSession(ctx context.Context) {
 	s.log.Info("end_session", "session", s.id)
 
 	s.scenario = nil
@@ -122,13 +128,11 @@ func (s *Session) handleEndSession(ctx context.Context) error {
 	s.convHistory = nil
 
 	// TODO: Close STT/TTS connections gracefully
-
-	return nil
 }
 
 // handleCancel aborts the current operation.
 // Currently just clears state; detailed cleanup left for later.
-func (s *Session) handleCancel(ctx context.Context) error {
+func (s *Session) handleCancel(ctx context.Context) {
 	s.log.Info("cancel", "session", s.id)
 
 	if s.utteranceOpen {
@@ -136,6 +140,4 @@ func (s *Session) handleCancel(ctx context.Context) error {
 		s.transcript.Reset()
 		// TODO: Cancel ongoing STT/LLM operations
 	}
-
-	return nil
 }

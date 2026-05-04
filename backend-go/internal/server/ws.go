@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"net/http"
@@ -24,6 +25,8 @@ func newSessionID() string {
 
 // wsHandler is the WebSocket connection handler.
 // Creates a Session and runs its state machine.
+// Note: x/net/websocket.Handler does not provide request context,
+// so we use context.Background() as the parent.
 func (s *Server) wsHandler(conn *websocket.Conn) {
 	sessionID := newSessionID()
 	s.log.Info("session connected", "sessionID", sessionID)
@@ -31,8 +34,9 @@ func (s *Server) wsHandler(conn *websocket.Conn) {
 	// Create a new session
 	sess := session.New(sessionID, conn, s.cfg, s.sk, s.log)
 
-	// Run the session's state machine (blocks until the WS closes)
-	err := sess.Run(nil)
+	// Run the session's state machine (blocks until the WS closes).
+	// Parent context is Background(); session will exit cleanly when conn closes.
+	err := sess.Run(context.Background())
 	if err != nil {
 		s.log.Error("session error", "sessionID", sessionID, "error", err)
 	}

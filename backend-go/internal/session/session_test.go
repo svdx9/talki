@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,58 +17,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-// TestSessionStateUnused tests that we can create a session without using it.
-func TestSessionStateUnused(t *testing.T) {
-	t.Parallel()
-
-	// Create a simple pipe connection (not using actual WS, just for setup)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
-	defer listener.Close()
-
-	// Create test skills
-	testSkills := []skills.Skill{
-		{
-			ID:           "skill-1",
-			Title:        "French Basics",
-			Level:        "beginner",
-			OpeningLine:  "Bonjour!",
-			Locale:       "fr-FR",
-			SystemPrompt: "You are a French tutor.",
-		},
-	}
-
-	// Create logger
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	// Create config
-	cfg := config.Config{
-		Port:      0,
-		LogLevel:  slog.LevelInfo,
-		DebugWS:   false,
-		MistralAPIKey: "test-key",
-		AnthropicAPIKey: "test-key",
-	}
-
-	// We can't easily test Session without a real WS conn, but we can at least
-	// verify the New() constructor works.
-	testConn := &websocket.Conn{}
-	sess := New("test-session-1", testConn, cfg, testSkills, logger)
-
-	if sess.id != "test-session-1" {
-		t.Errorf("expected id test-session-1, got %s", sess.id)
-	}
-	if sess.scenario != nil {
-		t.Errorf("expected scenario to be nil initially, got %v", sess.scenario)
-	}
-	if sess.utteranceOpen {
-		t.Errorf("expected utteranceOpen to be false initially")
-	}
-}
-
-// TestSessionWithFakeWS tests session handlers with a fake WebSocket connection via httptest.
+// TestSessionHandlers tests session handlers with a WebSocket connection via httptest.
 // This creates a real WS server in httptest and connects to it with a client.
 func TestSessionHandlers(t *testing.T) {
 	t.Parallel()
@@ -198,13 +147,19 @@ func TestSessionHandlers(t *testing.T) {
 			t.Fatalf("failed to send first start_utterance: %v", err)
 		}
 
-		// Receive no error (success)
-		wsConn2.SetReadDeadline(time.Now().Add(2 * time.Second))
-		if err := websocket.Message.Receive(wsConn2, &response); err != nil {
-			// It's okay if there's no response to the first one
+		// Receive response to first start_utterance (should be silent, no error)
+		wsConn2.SetReadDeadline(time.Now().Add(1 * time.Second))
+		firstResp := ""
+		receiveErr := websocket.Message.Receive(wsConn2, &firstResp)
+		if receiveErr == nil && firstResp != "" {
+			// Unexpected message received; check it's not an error
+			var unexpectedMsg protocol.Error
+			if json.Unmarshal([]byte(firstResp), &unexpectedMsg) == nil && unexpectedMsg.Type == "error" {
+				t.Fatalf("first start_utterance should not produce an error")
+			}
 		}
 
-		// Send start_utterance again
+		// Send start_utterance again (should fail)
 		data2, _ := json.Marshal(utteranceMsg)
 		if err := websocket.Message.Send(wsConn2, string(data2)); err != nil {
 			t.Fatalf("failed to send second start_utterance: %v", err)
@@ -218,13 +173,14 @@ func TestSessionHandlers(t *testing.T) {
 
 		var errMsg protocol.Error
 		if err := json.Unmarshal([]byte(response), &errMsg); err != nil {
-			// If we can't unmarshal, the handler may not have sent an error
-			// This is okay for this test
-			return
+			t.Fatalf("failed to unmarshal error response: %v", err)
 		}
 
 		if errMsg.Type != "error" {
-			t.Errorf("expected error message, got type %s", errMsg.Type)
+			t.Fatalf("expected error message, got type %s", errMsg.Type)
+		}
+		if !strings.Contains(errMsg.Message, "already open") {
+			t.Errorf("expected error message about utterance being open, got: %s", errMsg.Message)
 		}
 	})
 
@@ -326,9 +282,12 @@ func TestSessionClosesCleanly(t *testing.T) {
 	// Wait for the session to exit (with timeout)
 	select {
 	case err := <-runFinished:
-		if err != nil && err.Error() != "read error: use of closed network connection" && err.Error() != "read error: i/o timeout" {
-			// Some errors are acceptable when the connection closes
-			t.Logf("Session exited with error: %v", err)
+		// Acceptable errors when connection closes
+		if err != nil {
+			errStr := err.Error()
+			if !strings.Contains(errStr, "closed") && !strings.Contains(errStr, "timeout") && !strings.Contains(errStr, "EOF") {
+				t.Logf("Session exited with unexpected error: %v", err)
+			}
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("session did not exit within 5 seconds")

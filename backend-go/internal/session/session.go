@@ -3,8 +3,11 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -31,11 +34,10 @@ type Session struct {
 	outgoing       chan []byte
 	ctx            context.Context
 	cancel         context.CancelFunc
-	scenario       *skills.Skill
-	transcript     strings.Builder
-	utteranceOpen  bool
-	convHistory    []Message
-	writeMutex     sync.Mutex // Protects concurrent writes to conn
+	scenario      *skills.Skill
+	transcript    strings.Builder
+	utteranceOpen bool
+	convHistory   []Message
 }
 
 // New creates a new Session with all required fields.
@@ -113,7 +115,9 @@ func (s *Session) Run(parentCtx context.Context) error {
 
 // runWriter reads from the outgoing channel and writes to the WebSocket connection.
 // It also watches for context cancellation and sets a read deadline on the connection
-// to interrupt the reader.
+// to interrupt the reader. The writer is the sole goroutine that sends on conn.
+// Note: outgoing frames may be lost if ctx is cancelled while frames are enqueued.
+// This is intentional — on shutdown (client disconnect), we do not wait to flush.
 func (s *Session) runWriter() error {
 	// Watch for context cancellation in a separate goroutine
 	go func() {
@@ -130,9 +134,8 @@ func (s *Session) runWriter() error {
 			if !ok {
 				return nil
 			}
-			s.writeMutex.Lock()
+			// Only the writer goroutine touches conn for sending; no lock needed.
 			err := websocket.Message.Send(s.conn, string(data))
-			s.writeMutex.Unlock()
 			if err != nil {
 				return fmt.Errorf("write error: %w", err)
 			}
@@ -159,9 +162,16 @@ func (s *Session) runReader() error {
 
 		if err != nil {
 			// Connection closed or read error; exit cleanly
-			if err.Error() == "use of closed network connection" || 
-			   err.Error() == "i/o timeout" || 
-			   err.Error() == "EOF" {
+			// Check for common read-side errors without string matching.
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			// Also check for timeout using type assertion
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				return nil
 			}
 			return fmt.Errorf("read error: %w", err)
@@ -171,7 +181,7 @@ func (s *Session) runReader() error {
 		// PayloadType: 1 = text, 2 = binary
 		if s.conn.PayloadType == 2 { // Binary frame
 			if s.cfg.DebugWS {
-				s.log.Debug("session debug", "session", s.id, "frame", "binary", "bytes", len(data))
+				s.log.Debug("session binary frame", "session", s.id, "bytes", len(data))
 			}
 			if s.utteranceOpen {
 				// Log the audio frame length (no STT yet)
@@ -185,7 +195,7 @@ func (s *Session) runReader() error {
 
 		// Text frame
 		if s.cfg.DebugWS {
-			s.log.Debug("session debug", "session", s.id, "frame", "text", "bytes", len(data))
+			s.log.Debug("session text frame", "session", s.id, "bytes", len(data))
 		}
 
 		// Decode and handle the client message
@@ -198,6 +208,10 @@ func (s *Session) runReader() error {
 }
 
 // Send JSON-encodes the message and pushes it onto the outgoing channel.
+// Send is safe to call from any goroutine; it enqueues for the writer goroutine.
+// If ctx is cancelled, Send returns without blocking (frame may be lost).
+// Note: Future use from TTS/LLM streaming goroutines requires close(outgoing)
+// to be gated to avoid panic; see comment in runReader.
 func (s *Session) Send(msg any) {
 	data, err := json.Marshal(msg)
 	if err != nil {

@@ -13,7 +13,6 @@ import (
 func (s *Session) handle(ctx context.Context, raw []byte) error {
 	msg, err := protocol.DecodeClient(raw)
 	if err != nil {
-		// Send decode error to client and log
 		s.Send(protocol.NewError(fmt.Sprintf("Decode error: %v", err)))
 		return fmt.Errorf("decode error: %w", err)
 	}
@@ -21,44 +20,38 @@ func (s *Session) handle(ctx context.Context, raw []byte) error {
 	switch m := msg.(type) {
 	case *protocol.StartSession:
 		s.handleStartSession(ctx, m)
-		return nil
 	case *protocol.StartUtterance:
 		s.handleStartUtterance(ctx)
-		return nil
 	case *protocol.EndUtterance:
 		s.handleEndUtterance(ctx)
-		return nil
 	case *protocol.EndSession:
 		s.handleEndSession(ctx)
-		return nil
 	case *protocol.Cancel:
 		s.handleCancel(ctx)
-		return nil
 	default:
 		return fmt.Errorf("unhandled message type: %T", m)
 	}
+	return nil
 }
 
 // handleStartSession validates the scenario, sets it, clears transcript, and sends session_ready.
+// The ctx parameter is unused today but will be passed to STT/TTS initialization in 11.7+.
 func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSession) {
+	// TODO: use ctx for STT/TTS upstream calls when they land
 	s.log.Info("start_session", "session", s.id, "scenario", msg.ScenarioID, "sampleRate", msg.SampleRate)
 
-	// Validate scenario exists
 	skill := s.findSkillByID(msg.ScenarioID)
 	if skill == nil {
-		errMsg := fmt.Sprintf("Unknown scenario: %s", msg.ScenarioID)
 		s.log.Warn("unknown scenario", "session", s.id, "scenario", msg.ScenarioID)
-		s.Send(protocol.NewError(errMsg))
+		s.Send(protocol.NewError(fmt.Sprintf("Unknown scenario: %s", msg.ScenarioID)))
 		return
 	}
 
-	// Set the scenario and clear transcript
 	s.scenario = skill
 	s.transcript.Reset()
 	s.utteranceOpen = false
 	s.convHistory = nil
 
-	// Send session_ready with opening line
 	s.Send(protocol.NewSessionReady(skill.OpeningLine))
 
 	// TODO(stt): Initialize STT with skill's voice, locale, and msg.SampleRate
@@ -70,20 +63,17 @@ func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSes
 // handleStartUtterance begins audio capture.
 // Sends an error ServerMsg if an utterance is already open or if no scenario is active.
 func (s *Session) handleStartUtterance(ctx context.Context) {
-	s.log.Info("start_utterance", "session", s.id, "utteranceOpen", s.utteranceOpen)
+	s.log.Info("start_utterance", "session", s.id)
 
 	if s.utteranceOpen {
-		errMsg := "Utterance already open"
 		s.log.Warn("double start_utterance", "session", s.id)
-		s.Send(protocol.NewError(errMsg))
+		s.Send(protocol.NewError("Utterance already open"))
 		return
 	}
 
-	// Defensive check: start_session must precede start_utterance.
 	if s.scenario == nil {
-		errMsg := "No active scenario; send start_session first"
 		s.log.Warn("start_utterance without scenario", "session", s.id)
-		s.Send(protocol.NewError(errMsg))
+		s.Send(protocol.NewError("No active scenario; send start_session first"))
 		return
 	}
 
@@ -91,26 +81,21 @@ func (s *Session) handleStartUtterance(ctx context.Context) {
 	s.transcript.Reset()
 
 	// TODO(stt): Send audio to STT service
-
-	s.log.Info("utterance started", "session", s.id)
 }
 
 // handleEndUtterance closes the current audio capture.
 // Sends an error ServerMsg if no utterance is open.
 // The assistant response is left as a TODO(llm).
 func (s *Session) handleEndUtterance(ctx context.Context) {
-	s.log.Info("end_utterance", "session", s.id, "utteranceOpen", s.utteranceOpen)
+	s.log.Info("end_utterance", "session", s.id)
 
 	if !s.utteranceOpen {
-		errMsg := "No open utterance to end"
 		s.log.Warn("end_utterance without start", "session", s.id)
-		s.Send(protocol.NewError(errMsg))
+		s.Send(protocol.NewError("No open utterance to end"))
 		return
 	}
 
 	s.utteranceOpen = false
-
-	// Log the buffered transcript
 	transcriptText := s.transcript.String()
 	s.log.Info("utterance closed", "session", s.id, "transcript", transcriptText)
 
@@ -131,7 +116,7 @@ func (s *Session) handleEndSession(ctx context.Context) {
 }
 
 // handleCancel aborts the current operation.
-// Currently just clears state; detailed cleanup left for later.
+// Clears any open utterance; detailed STT/LLM cancellation left for later.
 func (s *Session) handleCancel(ctx context.Context) {
 	s.log.Info("cancel", "session", s.id)
 

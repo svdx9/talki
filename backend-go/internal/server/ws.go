@@ -25,8 +25,12 @@ func newSessionID() string {
 
 // wsHandler is the WebSocket connection handler.
 // Creates a Session and runs its state machine.
+//
 // Note: x/net/websocket.Handler does not provide request context,
-// so we use context.Background() as the parent.
+// so we use context.Background() as the parent. This means server
+// graceful shutdown (where the parent context is cancelled) will NOT
+// propagate to in-flight sessions. A sessions registry is needed
+// to coordinate shutdown (future work).
 func (s *Server) wsHandler(conn *websocket.Conn) {
 	sessionID := newSessionID()
 	s.log.Info("session connected", "sessionID", sessionID)

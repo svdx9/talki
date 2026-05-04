@@ -64,7 +64,8 @@ export const ChatWindow: Component<ChatWindowProps> = (props) => {
                   "word-break": "break-word",
                   background: entry.speaker === "user" ? "#007aff" : "#e9e9e9",
                   color: entry.speaker === "user" ? "#fff" : "#333",
-                  "font-style": entry.speaker === "user" && !entry.isFinal ? "italic" : "normal",
+                  "font-style":
+                    entry.speaker === "user" && !entry.isFinal ? "italic" : "normal",
                   opacity: entry.speaker === "user" && !entry.isFinal ? 0.7 : 1,
                 }}
               >

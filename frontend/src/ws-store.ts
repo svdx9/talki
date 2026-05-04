@@ -5,7 +5,11 @@ interface AudioSink {
   appendFrame: (buf: ArrayBuffer) => void;
 }
 
-export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
+export type ConnectionStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting";
 
 interface TranscriptEntry {
   id: number;
@@ -55,20 +59,27 @@ export function createWsStore() {
           const greeting = msg.greeting;
           setState("entries", (e) => [
             ...e,
-            { id: ++entryId, speaker: "assistant" as const, text: greeting, isFinal: true },
+            {
+              id: ++entryId,
+              speaker: "assistant" as const,
+              text: greeting,
+              isFinal: true,
+            },
           ]);
         }
         break;
 
       case "transcript": {
         const existing = state.entries.find(
-          (ent) => ent.speaker === "user" && !ent.isFinal
+          (ent) => ent.speaker === "user" && !ent.isFinal,
         );
         if (existing) {
           setState("entries", (e) =>
             e.map((ent) =>
-              ent.id === existing.id ? { ...ent, text: msg.text, isFinal: msg.isFinal } : ent
-            )
+              ent.id === existing.id
+                ? { ...ent, text: msg.text, isFinal: msg.isFinal }
+                : ent,
+            ),
           );
         } else {
           setState("entries", (e) => [
@@ -120,14 +131,19 @@ export function createWsStore() {
         const msg = JSON.parse(event.data) as ServerMsg;
         onMessage(msg);
       } else if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
-        const data = event.data instanceof Blob ? event.data.arrayBuffer() : Promise.resolve(event.data);
-        data.then((buf) => {
-          if (player && buf.byteLength > 0) {
-            player.appendFrame(buf);
-          }
-        }).catch((err: unknown) => {
-          console.error("Failed to process audio chunk:", err);
-        });
+        const data =
+          event.data instanceof Blob
+            ? event.data.arrayBuffer()
+            : Promise.resolve(event.data);
+        data
+          .then((buf) => {
+            if (player && buf.byteLength > 0) {
+              player.appendFrame(buf);
+            }
+          })
+          .catch((err: unknown) => {
+            console.error("Failed to process audio chunk:", err);
+          });
       }
     };
 
@@ -144,8 +160,8 @@ export function createWsStore() {
 
   const scheduleReconnect = () => {
     const delay = Math.min(
-      INITIAL_RECONNECT_DELAY * Math.pow(2, state.reconnectAttempt),
-      MAX_RECONNECT_DELAY
+      INITIAL_RECONNECT_DELAY * 2 ** state.reconnectAttempt,
+      MAX_RECONNECT_DELAY,
     );
     setState("reconnectAttempt", (a) => a + 1);
     setState("status", "reconnecting");

@@ -1,5 +1,5 @@
 import type { Component } from "solid-js";
-import { createSignal, onMount, For } from "solid-js";
+import { createSignal, For, onMount } from "solid-js";
 
 interface SkillInfo {
   id: string;
@@ -49,7 +49,14 @@ export const ScenarioPicker: Component<ScenarioPickerProps> = (props) => {
   };
 
   return (
-    <div style={{ display: "flex", "flex-direction": "column", "align-items": "center", gap: "0.5rem" }}>
+    <div
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        "align-items": "center",
+        gap: "0.5rem",
+      }}
+    >
       <label style={{ "font-weight": "500", color: "#333" }}>Choose a scenario:</label>
       <select
         onChange={handleChange}
@@ -57,7 +64,7 @@ export const ScenarioPicker: Component<ScenarioPickerProps> = (props) => {
         style={{
           padding: "0.5rem 1rem",
           "border-radius": "8px",
-          "border": "1px solid #ccc",
+          border: "1px solid #ccc",
           "font-size": "1rem",
           "min-width": "200px",
           background: "#fff",

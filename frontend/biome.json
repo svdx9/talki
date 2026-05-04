@@ -1,0 +1,63 @@
+{
+  "files": {
+    "includes": ["src/**"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 90,
+    "bracketSpacing": true
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noImplicitAnyLet": "error",
+        "noExtraNonNullAssertion": "error",
+        "noConsole": "warn"
+      },
+      "correctness": {
+        "noUndeclaredVariables": "error",
+        "useIsNan": "error",
+        "noSelfAssign": "error"
+      },
+      "style": {
+        "useImportType": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "jsxQuoteStyle": "double",
+      "bracketSameLine": false
+    }
+  },
+  "json": {
+    "formatter": {
+      "indentWidth": 2,
+      "indentStyle": "space",
+      "trailingCommas": "none"
+    }
+  },
+  "css": {
+    "formatter": {
+      "indentWidth": 2,
+      "indentStyle": "space"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.config.*"],
+      "linter": {
+        "enabled": false
+      }
+    }
+  ]
+}

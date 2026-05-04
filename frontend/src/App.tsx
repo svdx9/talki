@@ -1,9 +1,9 @@
 import type { Component } from "solid-js";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { createWsStore } from "./ws-store";
-import { ScenarioPicker } from "./scenario-picker";
 import { ChatWindow } from "./chat-window";
 import { OpusPlayer } from "./opus-player";
+import { ScenarioPicker } from "./scenario-picker";
+import { createWsStore } from "./ws-store";
 
 const PREFERRED_SAMPLE_RATE = 16000;
 
@@ -55,7 +55,7 @@ const App: Component = () => {
     audioContext = new AudioContext({ sampleRate: sessionSampleRate });
 
     await audioContext.audioWorklet.addModule(
-      new URL("./pcm-processor.worklet.ts", import.meta.url).href
+      new URL("./pcm-processor.worklet.ts", import.meta.url).href,
     );
 
     workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
@@ -149,7 +149,9 @@ const App: Component = () => {
 
       <Show when={ws.state.status === "disconnected"}>
         <button
-          onClick={() => { ws.connect(); }}
+          onClick={() => {
+            ws.connect();
+          }}
           style={{ ...btnStyle, background: "#007aff" }}
         >
           Connect
@@ -169,11 +171,16 @@ const App: Component = () => {
       </Show>
 
       <Show when={ws.state.sessionReady}>
-        <div style={{ display: "flex", "flex-direction": "column", "align-items": "center", gap: "1rem" }}>
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            "align-items": "center",
+            gap: "1rem",
+          }}
+        >
           <Show when={selectedScenario()}>
-            <p style={{ color: "#34c759", margin: 0 }}>
-              Scenario: {selectedScenario()}
-            </p>
+            <p style={{ color: "#34c759", margin: 0 }}>Scenario: {selectedScenario()}</p>
           </Show>
           <button
             onClick={toggleRecording}

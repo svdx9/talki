@@ -20,9 +20,7 @@ linters:
     exhaustruct:
       allow-empty: true
       exclude:
-        - '.*/conjugator\.VerbFormParameters'
-        - net/http\.Server
-        - log/slog\.HandlerOptions
+        - ".*/conjugator\\.VerbFormParameters"
     misspell:
       ignore-rules:
         - participe

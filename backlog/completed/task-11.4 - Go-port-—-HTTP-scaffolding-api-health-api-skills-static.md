@@ -1,9 +1,10 @@
 ---
 id: TASK-11.4
 title: 'Go port — HTTP scaffolding (/api/health, /api/skills, static)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:55'
+updated_date: '2026-05-04 10:55'
 labels:
   - go
   - port
@@ -18,8 +19,6 @@ ordinal: 5000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Wire the two GET endpoints and static-file serving. No WebSocket yet (next task).
-
 ## Hard constraints
 - Routing uses `*http.ServeMux` from stdlib. No `chi`. (Three routes total — stdlib mux is enough.)
 - Handlers receive their dependencies via constructor injection on a `Server` struct. No package-level state.
@@ -39,6 +38,19 @@ Wire the two GET endpoints and static-file serving. No WebSocket yet (next task)
 
 ## Tests
 - `httptest`-based tests for `/api/health` and `/api/skills`: assert status, content-type, and JSON shape (decode into a struct; no string equality).
+
+## Implementation
+- Created `backend-go/internal/server/server.go` with Server struct, New constructor, and handler methods
+- Created `backend-go/internal/server/static.go` with static file serving
+- Created `backend-go/internal/server/server_test.go` with httptest-based tests
+- Updated `backend-go/cmd/server/main.go` to use the Server
+
+All acceptance criteria met:
+- [x] #1 Handler tests verify /api/health returns valid JSON with status=ok and recent RFC3339 timestamp
+- [x] #2 Handler tests verify /api/skills returns id/title/level array
+- [x] #3 Static handler serves files from ../frontend/dist when present
+- [x] #4 Missing frontend/dist produces a warning, not an error
+- [x] #5 Handler tests use struct decoding, not string equality
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

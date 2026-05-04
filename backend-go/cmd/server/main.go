@@ -13,9 +13,8 @@ import (
 	"time"
 
 	"github.com/svdx9/talki/backend-go/internal/config"
+	"github.com/svdx9/talki/backend-go/internal/server"
 	"github.com/svdx9/talki/backend-go/internal/skills"
-
-	_ "golang.org/x/net/websocket"
 )
 
 func main() {
@@ -25,6 +24,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	//exhaustruct:ignore
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level:     cfg.LogLevel,
 		AddSource: false,
@@ -46,14 +46,12 @@ func main() {
 	}
 	logger.Info("Loaded " + strconv.Itoa(len(loadedSkills)) + " skill(s): " + strings.Join(skillIDs, ", "))
 
+	srv := server.New(cfg, loadedSkills, logger)
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	addr := ":" + strconv.Itoa(cfg.Port)
-	srv := &http.Server{Addr: addr}
-
 	go func() {
-		logger.Info("server listening on " + addr)
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server failed", "error", err)

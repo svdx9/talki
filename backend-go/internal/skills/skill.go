@@ -3,6 +3,7 @@ package skills
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -10,6 +11,8 @@ import (
 
 //go:embed catalog/*.json
 var Catalog embed.FS
+
+var ErrNoSkills = errors.New("no skills found in catalog")
 
 type Persona struct {
 	Name string `json:"name"`
@@ -51,20 +54,25 @@ func Load(fsys fs.FS) ([]Skill, error) {
 		if err != nil {
 			return nil, fmt.Errorf("opening %s: %w", path, err)
 		}
-		defer f.Close()
 
 		var skill Skill
 		dec := json.NewDecoder(f)
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&skill); err != nil {
+		err = dec.Decode(&skill)
+		if err != nil {
+			_ = f.Close()
 			return nil, fmt.Errorf("decoding %s: %w", path, err)
+		}
+		err = f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("closing %s: %w", path, err)
 		}
 
 		skills = append(skills, skill)
 	}
 
 	if len(skills) == 0 {
-		return nil, fmt.Errorf("no skills found in catalog")
+		return nil, ErrNoSkills
 	}
 
 	return skills, nil

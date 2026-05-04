@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoad_Fixture(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("testdata")
 	fsys := os.DirFS(dir)
 	skills, err := Load(fsys)
@@ -25,13 +26,15 @@ func TestLoad_Fixture(t *testing.T) {
 }
 
 func TestLoad_DisallowUnknownFields(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	subDir := filepath.Join(tmp, "catalog")
-	if err := os.Mkdir(subDir, 0755); err != nil {
+	err := os.Mkdir(subDir, 0o755)
+	if err != nil {
 		t.Fatal(err)
 	}
 	fixture := filepath.Join(subDir, "unknown-field.json")
-	err := os.WriteFile(fixture, []byte(`{
+	err = os.WriteFile(fixture, []byte(`{
   "id": "unknown-field-test",
   "title": "Test",
   "level": "A1",
@@ -42,7 +45,7 @@ func TestLoad_DisallowUnknownFields(t *testing.T) {
   "opening_line": "Hi",
   "system_prompt": "You",
   "unknown_field": "should error"
-}`), 0644)
+}`), 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +56,7 @@ func TestLoad_DisallowUnknownFields(t *testing.T) {
 }
 
 func TestLoad_Catalog(t *testing.T) {
+	t.Parallel()
 	skills, err := Load(Catalog)
 	if err != nil {
 		t.Fatalf("Load(Catalog) returned error: %v", err)
@@ -68,12 +72,14 @@ func TestLoad_Catalog(t *testing.T) {
 }
 
 func TestLoad_NoSkills(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	subDir := filepath.Join(tmp, "empty")
-	if err := os.Mkdir(subDir, 0755); err != nil {
+	err := os.Mkdir(subDir, 0o755)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(os.DirFS(subDir))
+	_, err = Load(os.DirFS(subDir))
 	if err == nil {
 		t.Error("expected error for empty catalog, got nil")
 	}

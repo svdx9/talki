@@ -1,9 +1,10 @@
 ---
 id: TASK-11.3
 title: Go port — skills loader + YAML→JSON catalog conversion
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:55'
+updated_date: '2026-05-04 10:19'
 labels:
   - go
   - port

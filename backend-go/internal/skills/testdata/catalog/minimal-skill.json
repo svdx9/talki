@@ -1,0 +1,18 @@
+{
+  "id": "test-skill",
+  "title": "Test skill for unit tests",
+  "level": "A1",
+  "locale": "en-US",
+  "voice": "test-voice-id",
+  "persona": {
+    "name": "Test Person",
+    "role": "test role"
+  },
+  "constraints": {
+    "vocabulary": "basic",
+    "turn_length": "short",
+    "corrections": "none"
+  },
+  "opening_line": "Hello, this is a test.",
+  "system_prompt": "You are a test person."
+}

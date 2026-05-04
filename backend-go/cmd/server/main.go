@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/svdx9/talki/backend-go/internal/config"
+	"github.com/svdx9/talki/backend-go/internal/skills"
 
 	_ "golang.org/x/net/websocket"
 )
@@ -32,6 +34,17 @@ func main() {
 	logger.Info("server starting",
 		slog.Any("config", cfg.Redacted()),
 	)
+
+	loadedSkills, err := skills.Load(skills.Catalog)
+	if err != nil {
+		logger.Error("skills load failed", "error", err)
+		os.Exit(1)
+	}
+	skillIDs := make([]string, len(loadedSkills))
+	for i, s := range loadedSkills {
+		skillIDs[i] = s.ID
+	}
+	logger.Info("Loaded " + strconv.Itoa(len(loadedSkills)) + " skill(s): " + strings.Join(skillIDs, ", "))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

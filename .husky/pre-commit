@@ -1,3 +1,0 @@
-npx lint-staged
-
-cd backend-go && make format && make lint

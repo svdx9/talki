@@ -1,0 +1,11 @@
+pre-commit:
+  commands:
+    biome:
+      glob: "*.{ts,tsx}"
+      run: npx biome check --write {staged_files}
+    backend-go-format:
+      glob: "*.go"
+      run: cd backend-go && make format
+    backend-go-lint:
+      glob: "*.go"
+      run: cd backend-go && make lint

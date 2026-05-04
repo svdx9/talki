@@ -1,9 +1,10 @@
 ---
 id: TASK-11.6
 title: Go port — session lifecycle + handler dispatch (upstream calls stubbed)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-02 15:56'
+updated_date: '2026-05-04 14:39'
 labels:
   - go
   - port
@@ -57,3 +58,54 @@ Implement the per-session state machine. STT/TTS/Anthropic calls are stubbed in 
 - [ ] #4 All handler unit tests pass against a fake WS conn
 - [ ] #5 No data races (`go test -race ./...` clean)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Implementation Complete
+
+### What was built:
+
+**Session Package** (`backend-go/internal/session/`):
+- `session.go`: Core Session struct with lifecycle management
+  - `New()` constructor initializing all required fields
+  - `Run()` method starting reader/writer goroutines
+  - `Send()` method for JSON encoding and channel queuing
+  - Safe concurrent access to WebSocket connection
+  - Context cancellation handling with read deadline signaling
+
+- `handlers.go`: Message dispatch and state machine
+  - `handle()` dispatcher with type switch for all message types
+  - `handleStartSession()`: validates scenario, sends session_ready with greeting
+  - `handleStartUtterance()`: prevents double-open, marks utterance state
+  - `handleEndUtterance()`: validates open state, logs transcript
+  - `handleEndSession()`: clears session state
+  - `handleCancel()`: aborts current operations
+
+- `session_test.go`: Comprehensive test suite
+  - Tests state machine via fake WebSocket (httptest + websocket.Server)
+  - Tests double start_utterance returns error
+  - Tests end_utterance without start returns error
+  - Tests graceful closure when WS closes
+  - All tests pass with no data races
+
+**Integration**:
+- Wired `Session.Run()` into `ws.go` handler
+- Session lifecycle tied to WebSocket connection
+- DEBUG_WS logging for frame inspection
+- Binary frame handling with audio detection
+
+### Hard Constraints Met:
+- ✅ Single writer goroutine owns outgoing channel
+- ✅ WriteMutex protects concurrent sends to conn
+- ✅ Read/write loops never share conn access
+- ✅ Context cancellation sets read deadline to interrupt reader
+- ✅ All goroutines derived from session context
+
+### Test Results:
+- ✅ All unit tests pass (3 test suites)
+- ✅ No data races detected (go test -race)
+- ✅ Graceful cleanup within 5 seconds on disconnect
+- ✅ Error handling for invalid state transitions
+- ✅ Proper message routing and dispatch
+<!-- SECTION:FINAL_SUMMARY:END -->

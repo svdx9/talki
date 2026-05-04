@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/svdx9/talki/backend-go/internal/session"
 	"golang.org/x/net/websocket"
 )
 
@@ -22,19 +23,18 @@ func newSessionID() string {
 }
 
 // wsHandler is the WebSocket connection handler.
-// Currently: generates a session ID, logs connect/disconnect, reads until EOF.
+// Creates a Session and runs its state machine.
 func (s *Server) wsHandler(conn *websocket.Conn) {
 	sessionID := newSessionID()
 	s.log.Info("session connected", "sessionID", sessionID)
 
-	// Read loop until peer closes (more reliable than ctx.Done() with x/net/websocket).
-	var msg string
-	for {
-		err := websocket.Message.Receive(conn, &msg)
-		if err != nil {
-			// Client disconnected or error occurred
-			break
-		}
+	// Create a new session
+	sess := session.New(sessionID, conn, s.cfg, s.sk, s.log)
+
+	// Run the session's state machine (blocks until the WS closes)
+	err := sess.Run(nil)
+	if err != nil {
+		s.log.Error("session error", "sessionID", sessionID, "error", err)
 	}
 
 	s.log.Info("session disconnected", "sessionID", sessionID)

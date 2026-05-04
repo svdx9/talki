@@ -58,6 +58,12 @@
       "linter": {
         "enabled": false
       }
+    },
+    {
+      "includes": ["**/*.worklet.ts"],
+      "javascript": {
+        "globals": ["AudioWorkletProcessor", "registerProcessor"]
+      }
     }
   ]
 }

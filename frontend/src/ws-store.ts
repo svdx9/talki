@@ -48,7 +48,6 @@ export function createWsStore() {
   let player: AudioSink | null = null;
 
   const onMessage = (msg: ServerMsg) => {
-    console.warn("[ws] <-", msg.type, msg);
     switch (msg.type) {
       case "session_ready":
         setState({
@@ -104,7 +103,6 @@ export function createWsStore() {
 
       case "error":
         setState("lastError", msg.message);
-        console.error("Server error:", msg.message);
         break;
     }
   };
@@ -141,9 +139,7 @@ export function createWsStore() {
               player.appendFrame(buf);
             }
           })
-          .catch((err: unknown) => {
-            console.error("Failed to process audio chunk:", err);
-          });
+          .catch((_err: unknown) => {});
       }
     };
 
@@ -152,8 +148,7 @@ export function createWsStore() {
       scheduleReconnect();
     };
 
-    ws.onerror = (e) => {
-      console.error("WebSocket error:", e);
+    ws.onerror = (_e) => {
       setState("lastError", "WebSocket connection failed");
     };
   };
@@ -165,7 +160,6 @@ export function createWsStore() {
     );
     setState("reconnectAttempt", (a) => a + 1);
     setState("status", "reconnecting");
-    console.warn("Scheduling reconnect in " + String(delay) + "ms");
     reconnectTimeout = setTimeout(() => {
       connect();
     }, delay);
@@ -182,11 +176,9 @@ export function createWsStore() {
   };
 
   const send = (msg: ClientMsg) => {
-    console.warn("[ws] -> send", msg.type, "readyState=", ws?.readyState);
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
     } else {
-      console.warn("[ws] send dropped: socket not open");
     }
   };
 

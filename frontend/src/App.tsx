@@ -33,18 +33,15 @@ const App: Component = () => {
   };
 
   const handleScenarioSelect = (scenarioId: string) => {
-    console.warn("[App] scenario selected:", scenarioId);
     setSelectedScenario(scenarioId);
     startAudioPlayer();
     ws.clearEntries();
     void probeAudioSampleRate()
       .then((rate) => {
         sessionSampleRate = rate;
-        console.warn(`[App] AudioContext sample rate: ${String(rate)} Hz`);
         ws.startSession(scenarioId, rate);
       })
-      .catch((err: unknown) => {
-        console.error("AudioContext probe failed:", err);
+      .catch((_err: unknown) => {
         ws.startSession(scenarioId, PREFERRED_SAMPLE_RATE);
       });
   };
@@ -59,18 +56,16 @@ const App: Component = () => {
     );
 
     workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
-    let micBytes = 0;
-    let micChunks = 0;
+    let _micBytes = 0;
+    let _micChunks = 0;
     micLogTimer = setInterval(() => {
-      console.warn("[mic] last 1s", { chunks: micChunks, bytes: micBytes });
-
-      micBytes = 0;
-      micChunks = 0;
+      _micBytes = 0;
+      _micChunks = 0;
     }, 1000);
     workletNode.port.onmessage = (event: MessageEvent<{ buffer: ArrayBuffer }>) => {
       const uint8 = new Uint8Array(event.data.buffer);
-      micBytes += uint8.byteLength;
-      micChunks += 1;
+      _micBytes += uint8.byteLength;
+      _micChunks += 1;
       ws.sendAudioChunk(uint8.buffer);
     };
 
@@ -112,9 +107,7 @@ const App: Component = () => {
     if (isRecording()) {
       stopRecording();
     } else {
-      startRecording().catch((err: unknown) => {
-        console.error("startRecording failed:", err);
-      });
+      startRecording().catch((_err: unknown) => {});
     }
   };
 
@@ -149,6 +142,7 @@ const App: Component = () => {
 
       <Show when={ws.state.status === "disconnected"}>
         <button
+          type="button"
           onClick={() => {
             ws.connect();
           }}
@@ -161,7 +155,7 @@ const App: Component = () => {
       <Show when={ws.state.status === "connecting" || ws.state.status === "reconnecting"}>
         <p style={{ color: "#888" }}>
           {ws.state.status === "reconnecting"
-            ? "Reconnecting... (attempt " + String(ws.state.reconnectAttempt) + ")"
+            ? `Reconnecting... (attempt ${String(ws.state.reconnectAttempt)})`
             : "Connecting..."}
         </p>
       </Show>
@@ -183,6 +177,7 @@ const App: Component = () => {
             <p style={{ color: "#34c759", margin: 0 }}>Scenario: {selectedScenario()}</p>
           </Show>
           <button
+            type="button"
             onClick={toggleRecording}
             disabled={!ws.state.sessionReady}
             style={{

@@ -35,9 +35,7 @@ export const ScenarioPicker: Component<ScenarioPickerProps> = (props) => {
   };
 
   onMount(() => {
-    fetchSkills().catch((err: unknown) => {
-      console.error("Failed to fetch skills:", err);
-    });
+    fetchSkills().catch((_err: unknown) => {});
   });
 
   const handleChange = (e: Event) => {
@@ -57,8 +55,11 @@ export const ScenarioPicker: Component<ScenarioPickerProps> = (props) => {
         gap: "0.5rem",
       }}
     >
-      <label style={{ "font-weight": "500", color: "#333" }}>Choose a scenario:</label>
+      <label for="scenario-select" style={{ "font-weight": "500", color: "#333" }}>
+        Choose a scenario:
+      </label>
       <select
+        id="scenario-select"
         onChange={handleChange}
         disabled={!!props.disabled || loading()}
         style={{

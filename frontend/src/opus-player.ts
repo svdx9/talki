@@ -20,21 +20,16 @@ export class OpusPlayer {
       if (!this.mediaSource) return;
       const mimeType = this.getSupportedMimeType();
       if (!mimeType) {
-        console.error("No supported audio MIME type for MediaSource");
         return;
       }
       try {
         this.sourceBuffer = this.mediaSource.addSourceBuffer(mimeType);
-        this.sourceBuffer.addEventListener("error", (e) => {
-          console.error("SourceBuffer error:", e);
-        });
+        this.sourceBuffer.addEventListener("error", (_e) => {});
         this.sourceBuffer.addEventListener("updateend", () => {
           this.drainQueue();
         });
         this.drainQueue();
-      } catch (e) {
-        console.error("Failed to create SourceBuffer:", e);
-      }
+      } catch (_e) {}
     });
   }
 
@@ -44,9 +39,7 @@ export class OpusPlayer {
     if (!next) return;
     try {
       this.sourceBuffer.appendBuffer(next);
-    } catch (e) {
-      console.error("Failed to append audio chunk:", e);
-    }
+    } catch (_e) {}
   }
 
   private getSupportedMimeType(): string | null {
@@ -68,9 +61,7 @@ export class OpusPlayer {
     if (this.mediaSource?.readyState !== "open") {
       this.initMediaSource();
     }
-    this.audio.play().catch((err: unknown) => {
-      console.error("Audio play failed:", err);
-    });
+    this.audio.play().catch((_err: unknown) => {});
   }
 
   pause(): void {
@@ -78,9 +69,7 @@ export class OpusPlayer {
   }
 
   resume(): void {
-    this.audio.play().catch((err: unknown) => {
-      console.error("Audio resume failed:", err);
-    });
+    this.audio.play().catch((_err: unknown) => {});
   }
 
   flush(): void {

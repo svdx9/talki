@@ -46,6 +46,7 @@ func New(cfg config.Config, sk []skills.Skill, log *slog.Logger) *Server {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/skills", s.handleSkills)
+	s.mux.Handle("/api/ws", s.newWSServer())
 	s.mux.Handle("/", s.staticHandler())
 }
 

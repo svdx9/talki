@@ -3,29 +3,25 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/svdx9/talki/backend-go/internal/config"
-	"github.com/svdx9/talki/backend-go/internal/protocol"
 	"github.com/svdx9/talki/backend-go/internal/skills"
-	"golang.org/x/net/websocket"
+	"golang.org/x/sync/errgroup"
 )
-
-// payloadTypeBinary is the WebSocket payload type for binary frames.
-// golang.org/x/net/websocket uses 2 for binary, 1 for text.
-const payloadTypeBinary = 2
 
 // writeTimeout is the per-write deadline for WebSocket sends.
 // A wedged peer (TCP black-holed) that doesn't read will cause writes to
 // block forever without this.
 const writeTimeout = 10 * time.Second
+
+// outgoingBuffer is the capacity of the outgoing channel. A small buffer
+// lets handlers enqueue without blocking on network I/O for a single send.
+const outgoingBuffer = 10
 
 // Message represents a message in the conversation history.
 type Message struct {
@@ -33,16 +29,19 @@ type Message struct {
 	Content string
 }
 
+type outgoingMsg struct {
+	typ  websocket.MessageType
+	data []byte
+}
+
 // Session represents a single WebSocket session with a client.
 type Session struct {
 	id            string
 	conn          *websocket.Conn
 	cfg           config.Config
-	allSkills     []skills.Skill
+	allSkills     skills.Repository
 	log           *slog.Logger
-	outgoing      chan []byte
-	ctx           context.Context
-	cancel        context.CancelFunc
+	outgoing      chan outgoingMsg
 	scenario      *skills.Skill
 	transcript    strings.Builder
 	utteranceOpen bool
@@ -51,193 +50,98 @@ type Session struct {
 
 // New creates a new Session with all required fields.
 // The session is not started until Run is called.
-func New(id string, conn *websocket.Conn, cfg config.Config, allSkills []skills.Skill, log *slog.Logger) *Session {
+func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repository, log *slog.Logger) *Session {
+	//exhaustruct:ignore
 	return &Session{
 		id:        id,
 		conn:      conn,
 		cfg:       cfg,
-		allSkills: allSkills,
+		outgoing:  make(chan outgoingMsg, outgoingBuffer),
+		allSkills: sr,
 		log:       log,
-		outgoing:  make(chan []byte, 10),
 	}
 }
 
 // Run starts the reader and writer goroutines and waits for both to complete.
 // Returns the first non-nil error encountered, or nil if both exit cleanly.
-// The parentCtx is used as the base context; when it cancels, the session ends.
-func (s *Session) Run(parentCtx context.Context) error {
-	// Create session context from parent, cancelling when parent does.
-	// This replaces the watcher goroutine that was previously in New.
-	s.ctx, s.cancel = context.WithCancel(parentCtx)
-
-	var wg sync.WaitGroup
-	var readerErr, writerErr error
-
-	// Start the writer goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		writerErr = s.runWriter()
-	}()
-
-	// Start the reader goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		readerErr = s.runReader()
-		// Signal cancellation when reader exits to unblock writer if needed
-		s.cancel()
-	}()
-
-	// Wait for both goroutines to finish
-	wg.Wait()
-
-	// Only one goroutine writes each variable, no lock needed after wg.Wait()
-	if readerErr != nil {
-		return readerErr
-	}
-	return writerErr
+// When ctx cancels, both goroutines unwind and the session ends.
+func (s *Session) Run(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return s.writer(ctx) })
+	g.Go(func() error { return s.reader(ctx) })
+	return g.Wait()
 }
 
-// runWriter reads from the outgoing channel and writes to the WebSocket connection.
-// It watches for context cancellation and sets a read deadline on the connection
-// to interrupt the reader. The writer is the sole goroutine that sends on conn.
-// When ctx is cancelled, it drains remaining messages before exiting
-// to avoid losing frames that were already enqueued.
-func (s *Session) runWriter() error {
-	// Watch for context cancellation in a separate goroutine to interrupt reader
-	go func() {
-		<-s.ctx.Done()
-		// Signal the read loop to interrupt by setting a read deadline in the past.
-		// Using time.Unix(1, 0) (non-zero past) as the conventional idiom.
-		_ = s.conn.SetReadDeadline(time.Unix(1, 0))
-	}()
-
+// writer drains the outgoing channel onto the WebSocket connection. It is the
+// sole goroutine that calls conn.Write. Each write is bounded by writeTimeout
+// so a wedged peer cannot block the session indefinitely.
+func (s *Session) writer(ctx context.Context) error {
 	for {
 		select {
-		case <-s.ctx.Done():
-			// Context cancelled; drain any remaining queued messages before exiting.
-			// This prevents frames that were already enqueued by handlers from being lost.
-			for {
-				select {
-				case data := <-s.outgoing:
-					_ = s.conn.SetWriteDeadline(time.Unix(1, 0)) // non-blocking send on close
-					_ = websocket.Message.Send(s.conn, string(data))
-				default:
-					return nil
-				}
-			}
-		case data, ok := <-s.outgoing:
-			if !ok {
-				return nil
-			}
-			// Only the writer goroutine touches conn for sending; no lock needed.
-			_ = s.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-			if err := websocket.Message.Send(s.conn, string(data)); err != nil {
-				return fmt.Errorf("write error: %w", err)
-			}
-		}
-	}
-}
-
-// runReader reads from the WebSocket connection and dispatches messages.
-// It handles both text and binary frames. This goroutine does NOT close outgoing;
-// that is done by the writer when ctx is cancelled, preventing Send() panics.
-func (s *Session) runReader() error {
-	for {
-		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return nil
-		default:
+		case msg := <-s.outgoing:
+			writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+			err := s.conn.Write(writeCtx, msg.typ, msg.data)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("websocket write: %w", err)
+			}
 		}
+	}
+}
 
-		// Use websocket.Message.Receive to read both text and binary frames.
-		// When reading with []byte, PayloadType indicates the frame type (1=text, 2=binary).
-		var data []byte
-		err := websocket.Message.Receive(s.conn, &data)
-
+// reader reads frames from the WebSocket connection and dispatches them.
+// Recoverable handler errors (decode failure, unknown message type) are logged
+// and the loop continues; only transport-level failures end the session.
+func (s *Session) reader(ctx context.Context) error {
+	for {
+		typ, data, err := s.conn.Read(ctx)
 		if err != nil {
-			// Connection closed or read error; exit cleanly.
-			// Check for common read-side errors without string matching.
-			if errors.Is(err, io.EOF) {
+			if websocket.CloseStatus(err) == websocket.StatusNormalClosure {
 				return nil
 			}
-			if errors.Is(err, net.ErrClosed) {
+			if ctx.Err() != nil {
 				return nil
 			}
-			// Also check for timeout using type assertion
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				return nil
-			}
-			return fmt.Errorf("read error: %w", err)
+			s.log.Error("unexpected_close", "session", s.id, "error", err)
+			return err
 		}
-
-		// Check the payload type
-		if s.conn.PayloadType == payloadTypeBinary {
+		switch typ {
+		case websocket.MessageText:
+			handleErr := s.handle(ctx, data)
+			if handleErr != nil {
+				s.log.Error("message handler error", "session", s.id, "error", handleErr)
+			}
+		case websocket.MessageBinary:
 			if s.cfg.DebugWS {
 				s.log.Debug("session binary frame", "session", s.id, "bytes", len(data))
 			}
 			if s.utteranceOpen {
-				// Log the audio frame length (no STT yet)
 				s.log.Debug("audio frame received", "session", s.id, "bytes", len(data))
 			} else {
-				// Error: unexpected audio frame
-				s.Send(protocol.NewError("Unexpected audio frame: send start_utterance first"))
+				s.log.Warn("received binary frame, but utterance is not open", "session", s.id)
 			}
-			continue
-		}
-
-		// Text frame
-		if s.cfg.DebugWS {
-			s.log.Debug("session text frame", "session", s.id, "bytes", len(data))
-		}
-
-		// Decode and handle the client message
-		err = s.handle(s.ctx, data)
-		if err != nil {
-			s.log.Error("message handler error", "session", s.id, "error", err)
-			s.Send(protocol.NewError(fmt.Sprintf("Handler error: %v", err)))
 		}
 	}
 }
 
-// Send JSON-encodes the message and pushes it onto the outgoing channel.
-// Send is safe to call from any goroutine; it enqueues for the writer goroutine.
-// If ctx is cancelled, Send returns without blocking (frame may be dropped).
-// The writer drains the queue on ctx cancel, so most frames sent before cancel
-// are still delivered, but frames queued after cancel may be lost.
-func (s *Session) Send(msg any) {
+// SendText JSON-encodes msg and enqueues it for the writer goroutine.
+// Safe to call from any goroutine. If ctx cancels before enqueue, the
+// frame is dropped.
+func (s *Session) SendText(ctx context.Context, msg any) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		s.log.Error("marshal error", "session", s.id, "error", err)
 		return
 	}
 	select {
-	case s.outgoing <- data:
-	case <-s.ctx.Done():
-		// Context cancelled, don't block trying to send
+	case s.outgoing <- outgoingMsg{data: data, typ: websocket.MessageText}:
+	case <-ctx.Done():
 	}
-}
-
-// Context returns the session's context.
-func (s *Session) Context() context.Context {
-	return s.ctx
 }
 
 // ID returns the session ID.
 func (s *Session) ID() string {
 	return s.id
-}
-
-// findSkillByID searches the skills list for a skill with the given ID.
-// Returns a pointer into the shared allSkills slice; safe because the slice
-// is constructed once at server startup and never mutated.
-func (s *Session) findSkillByID(id string) *skills.Skill {
-	for i := range s.allSkills {
-		if s.allSkills[i].ID == id {
-			return &s.allSkills[i]
-		}
-	}
-	return nil
 }

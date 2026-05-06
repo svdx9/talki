@@ -92,3 +92,7 @@ clean:
 .PHONY: dev
 dev: $(AIR)
 	$(AIR) -c .air.toml
+
+.PHONY: run
+run:
+	go run ./cmd/server/main.go

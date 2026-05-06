@@ -8,6 +8,7 @@ import (
 
 // TestRoundTripStartSession verifies StartSession encodes/decodes correctly.
 func TestRoundTripStartSession(t *testing.T) {
+	t.Parallel()
 	original := &StartSession{
 		Type:       "start_session",
 		ScenarioID: "scenario-123",
@@ -36,6 +37,7 @@ func TestRoundTripStartSession(t *testing.T) {
 
 // TestRoundTripEndSession verifies EndSession encodes/decodes correctly.
 func TestRoundTripEndSession(t *testing.T) {
+	t.Parallel()
 	original := &EndSession{Type: "end_session"}
 
 	data, err := json.Marshal(original)
@@ -56,6 +58,7 @@ func TestRoundTripEndSession(t *testing.T) {
 
 // TestRoundTripStartUtterance verifies StartUtterance encodes/decodes correctly.
 func TestRoundTripStartUtterance(t *testing.T) {
+	t.Parallel()
 	original := &StartUtterance{Type: "start_utterance"}
 
 	data, err := json.Marshal(original)
@@ -76,6 +79,7 @@ func TestRoundTripStartUtterance(t *testing.T) {
 
 // TestRoundTripEndUtterance verifies EndUtterance encodes/decodes correctly.
 func TestRoundTripEndUtterance(t *testing.T) {
+	t.Parallel()
 	original := &EndUtterance{Type: "end_utterance"}
 
 	data, err := json.Marshal(original)
@@ -96,6 +100,7 @@ func TestRoundTripEndUtterance(t *testing.T) {
 
 // TestRoundTripCancel verifies Cancel encodes/decodes correctly.
 func TestRoundTripCancel(t *testing.T) {
+	t.Parallel()
 	original := &Cancel{Type: "cancel"}
 
 	data, err := json.Marshal(original)
@@ -116,6 +121,7 @@ func TestRoundTripCancel(t *testing.T) {
 
 // TestRoundTripSessionReady verifies SessionReady with greeting encodes/decodes correctly.
 func TestRoundTripSessionReady(t *testing.T) {
+	t.Parallel()
 	original := NewSessionReady("Welcome!")
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -123,7 +129,8 @@ func TestRoundTripSessionReady(t *testing.T) {
 	}
 
 	var decoded SessionReady
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -134,6 +141,7 @@ func TestRoundTripSessionReady(t *testing.T) {
 
 // TestRoundTripSessionReadyNoGreeting verifies SessionReady without greeting (omitempty) encodes/decodes correctly.
 func TestRoundTripSessionReadyNoGreeting(t *testing.T) {
+	t.Parallel()
 	original := NewSessionReady("")
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -146,7 +154,8 @@ func TestRoundTripSessionReadyNoGreeting(t *testing.T) {
 	}
 
 	var decoded SessionReady
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -157,6 +166,7 @@ func TestRoundTripSessionReadyNoGreeting(t *testing.T) {
 
 // TestRoundTripTranscript verifies Transcript encodes/decodes correctly.
 func TestRoundTripTranscript(t *testing.T) {
+	t.Parallel()
 	original := NewTranscript("hello world", true)
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -164,7 +174,8 @@ func TestRoundTripTranscript(t *testing.T) {
 	}
 
 	var decoded Transcript
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -175,6 +186,7 @@ func TestRoundTripTranscript(t *testing.T) {
 
 // TestRoundTripAssistantTextDelta verifies AssistantTextDelta encodes/decodes correctly.
 func TestRoundTripAssistantTextDelta(t *testing.T) {
+	t.Parallel()
 	original := NewAssistantTextDelta("response chunk")
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -182,7 +194,8 @@ func TestRoundTripAssistantTextDelta(t *testing.T) {
 	}
 
 	var decoded AssistantTextDelta
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -193,6 +206,7 @@ func TestRoundTripAssistantTextDelta(t *testing.T) {
 
 // TestRoundTripAssistantDone verifies AssistantDone encodes/decodes correctly.
 func TestRoundTripAssistantDone(t *testing.T) {
+	t.Parallel()
 	original := NewAssistantDone("full response")
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -200,7 +214,8 @@ func TestRoundTripAssistantDone(t *testing.T) {
 	}
 
 	var decoded AssistantDone
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -211,6 +226,7 @@ func TestRoundTripAssistantDone(t *testing.T) {
 
 // TestRoundTripError verifies Error encodes/decodes correctly.
 func TestRoundTripError(t *testing.T) {
+	t.Parallel()
 	original := NewError("something went wrong")
 	data, err := json.Marshal(original)
 	if err != nil {
@@ -218,7 +234,8 @@ func TestRoundTripError(t *testing.T) {
 	}
 
 	var decoded Error
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	err = json.Unmarshal(data, &decoded)
+	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
@@ -229,6 +246,7 @@ func TestRoundTripError(t *testing.T) {
 
 // TestUnknownMessageType verifies that unknown types produce ErrUnknownMessageType.
 func TestUnknownMessageType(t *testing.T) {
+	t.Parallel()
 	payload := []byte(`{"type":"unknown_type"}`)
 
 	_, err := DecodeClient(payload)
@@ -239,6 +257,7 @@ func TestUnknownMessageType(t *testing.T) {
 
 // TestDecodeClientMissingType verifies that missing type field produces an error.
 func TestDecodeClientMissingType(t *testing.T) {
+	t.Parallel()
 	payload := []byte(`{"scenarioId":"test","sampleRate":16000}`)
 
 	_, err := DecodeClient(payload)

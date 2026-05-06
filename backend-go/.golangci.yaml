@@ -27,3 +27,6 @@ linters:
 
   disable:
     - depguard
+issues:
+  max-same-issues: 0 # 0 = unlimited
+  max-issues-per-linter: 0

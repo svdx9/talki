@@ -15,18 +15,25 @@ import (
 
 func TestHealth(t *testing.T) {
 	t.Parallel()
-	//exhaustruct:ignore
-	testSkills := []skills.Skill{
-		{ID: "test-1", Title: "Test Skill 1", Level: "beginner"},
-		{ID: "test-2", Title: "Test Skill 2", Level: "intermediate"},
+
+	repo := skills.NewMemoryRepository([]skills.Skill{
+		//exhaustruct:ignore
+		{
+			//exhaustruct:ignore
+			SkillDescription: skills.SkillDescription{
+				ID:    "1",
+				Title: "Test skill for unit tests",
+			},
+		},
+	})
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)) //exhaustruct:ignore
+	cfg := config.Config{Port: 0, LogLevel: slog.LevelInfo} //exhaustruct:ignore
+
+	srv, err := New(cfg, logger, repo)
+	if err != nil {
+		t.Errorf("unexpected erorr")
 	}
-
-	//exhaustruct:ignore
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	//exhaustruct:ignore
-	cfg := config.Config{Port: 0, LogLevel: slog.LevelInfo}
-
-	srv := New(cfg, testSkills, logger)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rr := httptest.NewRecorder()
@@ -45,7 +52,7 @@ func TestHealth(t *testing.T) {
 		Status    string `json:"status"`
 		Timestamp string `json:"timestamp"`
 	}
-	err := json.Unmarshal(rr.Body.Bytes(), &resp)
+	err = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if err != nil {
 		t.Fatalf("failed to decode JSON: %v", err)
 	}
@@ -66,19 +73,26 @@ func TestHealth(t *testing.T) {
 
 func TestSkills(t *testing.T) {
 	t.Parallel()
-	//exhaustruct:ignore
 	testSkills := []skills.Skill{
-		{ID: "skill-1", Title: "French Basics", Level: "beginner"},
-		{ID: "skill-2", Title: "French Advanced", Level: "advanced"},
-		{ID: "skill-3", Title: "Spanish Basics", Level: "beginner"},
+		//exhaustruct:ignore
+		{SkillDescription: skills.SkillDescription{ID: "skill-1", Title: "French Basics", Level: "beginner"}},
+		//exhaustruct:ignore
+		{SkillDescription: skills.SkillDescription{ID: "skill-2", Title: "French Advanced", Level: "advanced"}},
+		//exhaustruct:ignore
+		{SkillDescription: skills.SkillDescription{ID: "skill-3", Title: "Spanish Basics", Level: "beginner"}},
 	}
+	repo := skills.NewMemoryRepository(testSkills)
+	//exhaustruct:ignore
 
 	//exhaustruct:ignore
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	//exhaustruct:ignore
 	cfg := config.Config{Port: 0, LogLevel: slog.LevelInfo}
 
-	srv := New(cfg, testSkills, logger)
+	srv, err := New(cfg, logger, repo)
+	if err != nil {
+		t.Errorf("unexpected error: %s", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/skills", nil)
 	rr := httptest.NewRecorder()
@@ -99,7 +113,7 @@ func TestSkills(t *testing.T) {
 		Level string `json:"level"`
 	}
 	var resp []skillSubset
-	err := json.Unmarshal(rr.Body.Bytes(), &resp)
+	err = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if err != nil {
 		t.Fatalf("failed to decode JSON: %v", err)
 	}

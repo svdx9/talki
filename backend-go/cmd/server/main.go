@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -35,18 +33,16 @@ func main() {
 		slog.Any("config", cfg.Redacted()),
 	)
 
-	loadedSkills, err := skills.Load(skills.Catalog)
+	skills, err := skills.NewMemoryRepositoryFromFile(skills.Catalog)
 	if err != nil {
 		logger.Error("skills load failed", "error", err)
 		os.Exit(1)
 	}
-	skillIDs := make([]string, len(loadedSkills))
-	for i, s := range loadedSkills {
-		skillIDs[i] = s.ID
+	srv, err := server.New(cfg, logger, skills)
+	if err != nil {
+		logger.Error("server", "error", err)
+		os.Exit(1)
 	}
-	logger.Info("Loaded " + strconv.Itoa(len(loadedSkills)) + " skill(s): " + strings.Join(skillIDs, ", "))
-
-	srv := server.New(cfg, loadedSkills, logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

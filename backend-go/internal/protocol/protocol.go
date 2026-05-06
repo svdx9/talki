@@ -123,42 +123,48 @@ func NewError(message string) *Error {
 // Returns ErrUnknownMessageType if the type field is unrecognized.
 func DecodeClient(payload []byte) (any, error) {
 	var raw RawClientMsg
-	if err := json.Unmarshal(payload, &raw); err != nil {
+	err := json.Unmarshal(payload, &raw)
+	if err != nil {
 		return nil, fmt.Errorf("failed to decode raw message: %w", err)
 	}
 
 	switch raw.Type {
 	case "start_session":
 		var msg StartSession
-		if err := json.Unmarshal(payload, &msg); err != nil {
+		err = json.Unmarshal(payload, &msg)
+		if err != nil {
 			return nil, fmt.Errorf("failed to decode start_session: %w", err)
 		}
 		return &msg, nil
 
 	case "end_session":
 		var msg EndSession
-		if err := json.Unmarshal(payload, &msg); err != nil {
+		err = json.Unmarshal(payload, &msg)
+		if err != nil {
 			return nil, fmt.Errorf("failed to decode end_session: %w", err)
 		}
 		return &msg, nil
 
 	case "start_utterance":
 		var msg StartUtterance
-		if err := json.Unmarshal(payload, &msg); err != nil {
+		err = json.Unmarshal(payload, &msg)
+		if err != nil {
 			return nil, fmt.Errorf("failed to decode start_utterance: %w", err)
 		}
 		return &msg, nil
 
 	case "end_utterance":
 		var msg EndUtterance
-		if err := json.Unmarshal(payload, &msg); err != nil {
+		err = json.Unmarshal(payload, &msg)
+		if err != nil {
 			return nil, fmt.Errorf("failed to decode end_utterance: %w", err)
 		}
 		return &msg, nil
 
 	case "cancel":
 		var msg Cancel
-		if err := json.Unmarshal(payload, &msg); err != nil {
+		err = json.Unmarshal(payload, &msg)
+		if err != nil {
 			return nil, fmt.Errorf("failed to decode cancel: %w", err)
 		}
 		return &msg, nil

@@ -4,6 +4,7 @@ title: Go port — parent
 status: To Do
 assignee: []
 created_date: '2026-05-02 15:54'
+updated_date: '2026-05-06 22:08'
 labels:
   - go
   - port
@@ -21,14 +22,14 @@ Tracking task for the Go port of the backend currently implemented in TypeScript
 
 ## Hard constraints (apply to every subtask)
 - All Go code MUST live under `backend-go/cmd/server/` with feature subpackages under `backend-go/internal/<feature>/`. No top-level `internal/` and no `pkg/`. (We will reorganize to `/backend` only after cutover.)
-- WebSocket (server accept + STT client dial) MUST use `golang.org/x/net/websocket`. No `gorilla/websocket`, no `nhooyr.io/websocket`, no `coder/websocket`.
+- WebSocket (server accept + STT client dial) MUST use `github.com/coder/websocket`.
 - Otherwise stdlib only. No chi, no pgx/sqlc, no oapi-codegen, no Anthropic SDK, no Mistral SDK, no YAML library, no dotenv loader.
 - Skill files (`backend/src/skills/catalog/*.yaml`) are converted **once** to JSON under `backend-go/internal/skills/catalog/*.json`. The YAML originals are removed at cutover.
 - Style follows the go-backend skill: explicit `err := f(); if err != nil` (no inline scoping), constructors over partial structs, contexts injected as the first parameter, `log/slog` for logging with `session_id` field, no global state.
 - WS write serialization: each session has one writer goroutine fed by a `chan []byte`; `*websocket.Conn` is not safe for concurrent writes.
 
 ## Session model
-One goroutine per session reads client frames; one goroutine reads STT events from Voxtral; one goroutine reads SSE deltas from Anthropic during a reply. All derive context from the session context which is cancelled on WS close. To unblock blocked reads on cancel, set a past read deadline via `conn.SetReadDeadline(time.Now())`.
+One goroutine per session reads client frames; one goroutine reads STT events from Voxtral; one goroutine reads SSE deltas from Anthropic during a reply. All derive context from the session context which is cancelled on WS close. To unblock blocked reads on cancel, cancel the context passed to `conn.Read(ctx)` — `coder/websocket` ties read lifetime to context, no deadline hack needed.
 
 ## TS source-of-truth files to mirror
 - Protocol: `shared/src/protocol.ts`

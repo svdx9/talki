@@ -1,9 +1,10 @@
 ---
 id: TASK-11.5
 title: Go port — protocol types + WebSocket upgrade at /api/ws
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:55'
+updated_date: '2026-05-06 22:08'
 labels:
   - go
   - port
@@ -21,7 +22,7 @@ ordinal: 6000
 Define the wire protocol structs (mirrors `shared/src/protocol.ts`) and accept WebSocket upgrades. No session lifecycle yet — the handler just accepts, logs, and closes.
 
 ## Hard constraints
-- WebSocket library: `golang.org/x/net/websocket` ONLY.
+- WebSocket library: `github.com/coder/websocket` ONLY.
 - No third-party JSON libs — use `encoding/json`.
 
 ## ClientMsg / ServerMsg in TS (single source of truth)
@@ -51,12 +52,10 @@ ServerMsg =
 
 ## WS upgrade
 - `backend-go/internal/server/ws.go`:
-  - Use `websocket.Server{ Handshake: func(*websocket.Config, *http.Request) error { return nil }, Handler: ... }` to accept any Origin (frontend served from same host today).
+  - Use `websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})` to accept any Origin.
   - Mount at `/api/ws` from `Server.New`.
-  - The handler currently: generates a session ID (`crypto/rand` + base32, 6 chars lowercase), logs `session XXX connected`, blocks until the conn closes, logs `session XXX disconnected`.
-
-## x/net/websocket quirk to document in code
-- It distinguishes binary vs text via the Go type passed to `Receive`/`Send` (`[]byte` vs `string`). For mixed traffic, use `websocket.Message.Receive(conn, &raw)` where `raw` is `[]byte` and inspect `conn.PayloadType` (1 = text, 2 = binary) per frame. Add a comment in `ws.go` citing this.
+  - The handler: generates a session ID (`crypto/rand` + base32, 6 chars lowercase), logs `session XXX connected`, blocks until the conn closes, logs `session XXX disconnected`.
+  - Read frames with `conn.Read(ctx)` which returns `(websocket.MessageType, []byte, error)`. MessageType is `websocket.MessageText` or `websocket.MessageBinary`.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

@@ -1,9 +1,10 @@
 ---
 id: TASK-11.7
-title: Go port — Voxtral STT realtime client over x/net/websocket
+title: Go port — Voxtral STT realtime client over coder/websocket
 status: To Do
 assignee: []
 created_date: '2026-05-02 15:56'
+updated_date: '2026-05-06 22:08'
 labels:
   - go
   - port
@@ -22,13 +23,12 @@ ordinal: 8000
 Hand-rolled client for Mistral's realtime transcription WebSocket API, replacing the SDK we use in TS (`backend/src/integrations/mistral-realtime.ts`). This is the largest single piece of the port.
 
 ## Hard constraints
-- WS dial uses `websocket.DialConfig` (from `golang.org/x/net/websocket`).
+- WS dial uses `github.com/coder/websocket`.
 - No Mistral SDK.
 
 ## Wire protocol (verified against the SDK source during the TS rewrite)
 - URL: `wss://api.mistral.ai/v1/audio/transcriptions/realtime?model=<model>`
 - Header: `Authorization: Bearer <api_key>`
-- Origin: `https://api.mistral.ai` (required by `websocket.NewConfig`).
 - Outgoing JSON messages (text frames):
   - `{\"type\":\"session.update\",\"session\":{\"audio_format\":{\"encoding\":\"pcm_s16le\",\"sample_rate\":<n>}}}`
   - `{\"type\":\"input_audio.append\",\"audio\":\"<base64-pcm>\"}`
@@ -59,8 +59,9 @@ func (c *Client) End(ctx context.Context) error
 func (c *Client) Events() <-chan Event
 func (c *Client) Close() error
 ```
-- `Dial` opens the WS, reads the first frame, asserts `session.created`, sends a `session.update` with the requested format, waits for `session.updated`, then starts a read goroutine that decodes frames into typed `Event`s on a buffered channel (size 64). Unknown types still get an `Event{Type: ..., Raw: ...}` so the caller can log them.
-- Writer methods take a `*sync.Mutex` so multiple senders cannot interleave. `SendAudio` base64-encodes the PCM and json-marshals once per call.
+- `Dial` opens the WS via `websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer " + apiKey}}})`, reads the first frame, asserts `session.created`, sends a `session.update` with the requested format, waits for `session.updated`, then starts a read goroutine that decodes frames into typed `Event`s on a buffered channel (size 64). Unknown types still get an `Event{Type: ..., Raw: ...}` so the caller can log them.
+- Read frames with `conn.Read(ctx)` → `(websocket.MessageType, []byte, error)`.
+- Write frames with `conn.Write(ctx, websocket.MessageText, data)`. Writer methods take a `*sync.Mutex` so multiple senders cannot interleave. `SendAudio` base64-encodes the PCM and json-marshals once per call.
 - `Close` cancels the read loop, calls `End` best-effort, closes the conn.
 - Spurious-flush filter: in the read loop, if event is `error` AND message contains `Cannot flush audio before sending any audio bytes`, log at warn and continue. Else forward.
 
@@ -76,7 +77,7 @@ func (c *Client) Close() error
 - `closeVoxtral` (on session end / WS close): cancel read loop, call `End` best-effort, `Close` the conn.
 
 ## Tests
-- A faked Voxtral server using `httptest.NewServer` + `websocket.Server` that accepts a connection, emits scripted JSON events, and verifies the messages the client sends.
+- A faked Voxtral server using `httptest.NewServer` + `websocket.Accept(w, r, nil)` (from `github.com/coder/websocket`) that accepts a connection, emits scripted JSON events, and verifies the messages the client sends.
 - Test cases (slice-of-structs):
   - Happy path: dial → session.created → session.updated → caller sends 1KB audio → flush → done event flows out the events channel.
   - Spurious flush: server emits the early error; client must drop it and remain functional for subsequent audio.

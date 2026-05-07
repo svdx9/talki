@@ -3,9 +3,13 @@ package session
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/svdx9/talki/backend-go/internal/protocol"
+	"github.com/svdx9/talki/backend-go/internal/tts"
 )
+
+const voxtralSTTModel = "voxtral-mini-transcribe-realtime-2602"
 
 // handle decodes the raw client message and dispatches to the appropriate handler.
 // State-machine errors (invalid transitions) are sent as error ServerMsgs and return nil.
@@ -36,10 +40,9 @@ func (s *Session) handle(ctx context.Context, raw []byte) error {
 	return nil
 }
 
-// handleStartSession validates the scenario, sets it, clears transcript, and sends session_ready.
-// The ctx parameter is unused today but will be passed to STT/TTS initialization in 11.7+.
+// handleStartSession validates the scenario, opens a Voxtral STT connection,
+// and sends session_ready to the client.
 func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSession) {
-	// TODO: use ctx for STT/TTS upstream calls when they land
 	s.log.Info("start_session", "session", s.id, "scenario", msg.ScenarioID, "sampleRate", msg.SampleRate)
 
 	skill, err := s.allSkills.Get(msg.ScenarioID)
@@ -49,14 +52,30 @@ func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSes
 		return
 	}
 
+	// Close any previous STT connection before opening a new one.
+	s.closeSTT()
+
 	s.scenario = skill
 	s.transcript.Reset()
 	s.utteranceOpen = false
 	s.convHistory = nil
 
+	af := tts.AudioFormat{Encoding: "pcm_s16le", SampleRate: msg.SampleRate}
+	client, err := s.dialSTT(ctx, s.cfg.MistralAPIKey, voxtralSTTModel, af)
+	if err != nil {
+		s.log.Error("STT dial failed", "session", s.id, "error", err)
+		s.SendText(ctx, protocol.NewError("STT connection failed"))
+		return
+	}
+	s.sttClient = client
+	s.sttBytesPushed = 0
+	s.utterancePeak = 0
+
+	s.sttWg.Add(1)
+	go s.readSTTEvents(ctx, client)
+
 	s.SendText(ctx, protocol.NewSessionReady(skill.OpeningLine))
 
-	// TODO(stt): Initialize STT with skill's voice, locale, and msg.SampleRate
 	// TODO(tts): Initialize TTS connection with skill's voice
 
 	s.log.Info("session started", "session", s.id, "scenario", skill.ID, "title", skill.Title)
@@ -81,13 +100,12 @@ func (s *Session) handleStartUtterance(ctx context.Context) {
 
 	s.utteranceOpen = true
 	s.transcript.Reset()
-
-	// TODO(stt): Send audio to STT service
+	s.sttBytesPushed = 0
+	s.utterancePeak = 0
 }
 
-// handleEndUtterance closes the current audio capture.
+// handleEndUtterance closes the current audio capture and flushes to the STT service.
 // Sends an error ServerMsg if no utterance is open.
-// The assistant response is left as a TODO(llm).
 func (s *Session) handleEndUtterance(ctx context.Context) {
 	s.log.Info("end_utterance", "session", s.id)
 
@@ -98,33 +116,57 @@ func (s *Session) handleEndUtterance(ctx context.Context) {
 	}
 
 	s.utteranceOpen = false
-	transcriptText := s.transcript.String()
-	s.log.Info("utterance closed", "session", s.id, "transcript", transcriptText)
+
+	if s.sttClient == nil || s.sttBytesPushed == 0 {
+		s.log.Warn("end_utterance with no audio — skipping flush", "session", s.id)
+		s.sttBytesPushed = 0
+		s.utterancePeak = 0
+		return
+	}
+
+	peakDB := math.Inf(-1)
+	if s.utterancePeak > 0 {
+		peakDB = 20 * math.Log10(float64(s.utterancePeak)/32768.0)
+	}
+	s.log.Warn("utterance stats",
+		"session", s.id,
+		"peak", s.utterancePeak,
+		"dBFS", fmt.Sprintf("%.1f", peakDB),
+		"bytes", s.sttBytesPushed,
+	)
+
+	err := s.sttClient.Flush(ctx)
+	if err != nil {
+		s.log.Error("STT flush error", "session", s.id, "error", err)
+	}
+
+	s.sttBytesPushed = 0
+	s.utterancePeak = 0
 
 	// TODO(llm): Send transcript to Anthropic and stream response
 }
 
-// handleEndSession clears the session state.
-// No upstream effects yet (STT/TTS/LLM cleanup left for later).
+// handleEndSession closes the STT connection and clears session state.
 func (s *Session) handleEndSession(_ context.Context) {
 	s.log.Info("end_session", "session", s.id)
+
+	s.closeSTT()
 
 	s.scenario = nil
 	s.transcript.Reset()
 	s.utteranceOpen = false
 	s.convHistory = nil
-
-	// TODO: Close STT/TTS connections gracefully
 }
 
-// handleCancel aborts the current operation.
-// Clears any open utterance; detailed STT/LLM cancellation left for later.
+// handleCancel aborts any open utterance. STT remains open so the user can speak again.
 func (s *Session) handleCancel(_ context.Context) {
 	s.log.Info("cancel", "session", s.id)
 
 	if s.utteranceOpen {
 		s.utteranceOpen = false
 		s.transcript.Reset()
-		// TODO: Cancel ongoing STT/LLM operations
+		s.sttBytesPushed = 0
+		s.utterancePeak = 0
+		// TODO: Cancel ongoing LLM operations
 	}
 }

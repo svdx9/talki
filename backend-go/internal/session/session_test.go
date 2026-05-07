@@ -16,6 +16,8 @@ import (
 	"github.com/svdx9/talki/backend-go/internal/config"
 	"github.com/svdx9/talki/backend-go/internal/protocol"
 	"github.com/svdx9/talki/backend-go/internal/skills"
+	"github.com/svdx9/talki/backend-go/internal/tts"
+	"github.com/svdx9/talki/backend-go/internal/tts/voxtral"
 )
 
 var errUnknownSkill = errors.New("unknown skill")
@@ -57,6 +59,46 @@ func newTestRepo() *fakeRepo {
 	return &fakeRepo{byID: map[string]*skills.Skill{s.ID: s}}
 }
 
+// fakeVoxtralServer starts a local server that mimics the Voxtral STT WebSocket API.
+// It performs the handshake and then holds the connection open until the client closes.
+// Returns a STTDialFunc that connects to the fake server instead of Voxtral.
+func fakeVoxtralServer(t *testing.T) STTDialFunc {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//exhaustruct:ignore
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			t.Logf("fake voxtral accept: %v", err)
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+
+		ctx := r.Context()
+		writeJSON := func(v any) {
+			data, _ := json.Marshal(v)
+			_ = conn.Write(ctx, websocket.MessageText, data)
+		}
+
+		writeJSON(map[string]string{"type": "session.created"})
+		_, _, _ = conn.Read(ctx) // consume session.update
+		writeJSON(map[string]string{"type": "session.updated"})
+
+		// Hold connection open until client closes.
+		for {
+			_, _, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	fakeURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	return func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.STTClient, error) {
+		return voxtral.Dial(ctx, apiKey, model, af, &voxtral.DialOptions{BaseURL: fakeURL})
+	}
+}
+
 func testServerAndURL(t *testing.T) (*httptest.Server, string, <-chan error) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -70,6 +112,7 @@ func testServerAndURL(t *testing.T) (*httptest.Server, string, <-chan error) {
 	}
 	repo := newTestRepo()
 	runFinished := make(chan error, 1)
+	dialSTT := fakeVoxtralServer(t)
 
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//exhaustruct:ignore
@@ -80,6 +123,7 @@ func testServerAndURL(t *testing.T) (*httptest.Server, string, <-chan error) {
 		}
 		defer func() { _ = wc.CloseNow() }()
 		sess := New("test-session", wc, cfg, repo, logger)
+		sess.dialSTT = dialSTT
 		runFinished <- sess.Run(r.Context())
 	}))
 	return httpSrv, "ws" + strings.TrimPrefix(httpSrv.URL, "http") + "/ws", runFinished

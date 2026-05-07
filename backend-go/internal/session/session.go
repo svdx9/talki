@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/svdx9/talki/backend-go/internal/config"
+	"github.com/svdx9/talki/backend-go/internal/protocol"
 	"github.com/svdx9/talki/backend-go/internal/skills"
+	"github.com/svdx9/talki/backend-go/internal/tts"
+	"github.com/svdx9/talki/backend-go/internal/tts/voxtral"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -34,6 +38,10 @@ type outgoingMsg struct {
 	data []byte
 }
 
+// STTDialFunc is the signature for opening a realtime STT connection.
+// The default dials Voxtral; tests may substitute a local fake via this field.
+type STTDialFunc func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.STTClient, error)
+
 // Session represents a single WebSocket session with a client.
 type Session struct {
 	id            string
@@ -46,6 +54,12 @@ type Session struct {
 	transcript    strings.Builder
 	utteranceOpen bool
 	convHistory   []Message
+
+	dialSTT        STTDialFunc
+	sttClient      tts.STTClient
+	sttWg          sync.WaitGroup
+	sttBytesPushed int
+	utterancePeak  int
 }
 
 // New creates a new Session with all required fields.
@@ -59,6 +73,9 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 		outgoing:  make(chan outgoingMsg, outgoingBuffer),
 		allSkills: sr,
 		log:       log,
+		dialSTT: func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.STTClient, error) {
+			return voxtral.Dial(ctx, apiKey, model, af, nil)
+		},
 	}
 }
 
@@ -66,6 +83,7 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 // Returns the first non-nil error encountered, or nil if both exit cleanly.
 // When ctx cancels, both goroutines unwind and the session ends.
 func (s *Session) Run(ctx context.Context) error {
+	defer s.closeSTT()
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return s.writer(ctx) })
 	g.Go(func() error { return s.reader(ctx) })
@@ -107,6 +125,9 @@ func (s *Session) reader(ctx context.Context) error {
 			s.log.Error("unexpected_close", "session", s.id, "error", err)
 			return err
 		}
+		if s.cfg.DebugWS {
+			s.log.Debug("session frame", "session", s.id, "type", typ, "bytes", len(data))
+		}
 		switch typ {
 		case websocket.MessageText:
 			handleErr := s.handle(ctx, data)
@@ -114,16 +135,90 @@ func (s *Session) reader(ctx context.Context) error {
 				s.log.Error("message handler error", "session", s.id, "error", handleErr)
 			}
 		case websocket.MessageBinary:
-			if s.cfg.DebugWS {
-				s.log.Debug("session binary frame", "session", s.id, "bytes", len(data))
-			}
-			if s.utteranceOpen {
-				s.log.Debug("audio frame received", "session", s.id, "bytes", len(data))
-			} else {
-				s.log.Warn("received binary frame, but utterance is not open", "session", s.id)
-			}
+			s.pushAudio(ctx, data)
 		}
 	}
+}
+
+// pushAudio tracks peak amplitude, forwards PCM to the STT client, and
+// accumulates byte count for the per-utterance diagnostic log.
+func (s *Session) pushAudio(ctx context.Context, pcm []byte) {
+	// Scan 16-bit little-endian PCM samples for peak amplitude.
+	for i := 0; i+1 < len(pcm); i += 2 {
+		sample := int(int16(uint16(pcm[i]) | uint16(pcm[i+1])<<8))
+		if sample < 0 {
+			sample = -sample
+		}
+		if sample > s.utterancePeak {
+			s.utterancePeak = sample
+		}
+	}
+	s.sttBytesPushed += len(pcm)
+
+	if s.sttClient == nil {
+		s.log.Warn("audio frame dropped, no STT client", "session", s.id, "bytes", len(pcm))
+		return
+	}
+	if !s.utteranceOpen {
+		s.log.Warn("audio frame dropped, utterance not open", "session", s.id, "bytes", len(pcm))
+		return
+	}
+	err := s.sttClient.SendAudio(ctx, pcm)
+	if err != nil {
+		s.log.Error("STT send audio error", "session", s.id, "error", err)
+	}
+}
+
+// readSTTEvents ranges over the STT client's event channel and forwards
+// transcript events to the WebSocket client. Runs in its own goroutine.
+func (s *Session) readSTTEvents(ctx context.Context, client tts.STTClient) {
+	defer s.sttWg.Done()
+	for {
+		select {
+		case ev, ok := <-client.Events():
+			if !ok {
+				return
+			}
+			s.log.Warn("STT event", "session", s.id, "type", ev.Type)
+			switch ev.Type {
+			case "transcription.text.delta":
+				s.transcript.WriteString(ev.Text)
+				s.log.Warn("transcript delta", "session", s.id, "text", ev.Text)
+				s.SendText(ctx, protocol.NewTranscript(ev.Text, false))
+			case "transcription.segment.delta":
+				if ev.Text != "" {
+					s.transcript.WriteString(ev.Text)
+					s.log.Warn("transcript delta", "session", s.id, "text", ev.Text)
+					s.SendText(ctx, protocol.NewTranscript(ev.Text, false))
+				}
+			case "transcription.done":
+				final := s.transcript.String()
+				s.log.Warn("transcript final", "session", s.id, "text", final)
+				s.SendText(ctx, protocol.NewTranscript("", true))
+			case "error":
+				s.log.Error("STT error", "session", s.id, "raw", string(ev.Raw))
+				s.SendText(ctx, protocol.NewError("STT error"))
+			default:
+				s.log.Info("STT unknown event", "session", s.id, "type", ev.Type, "raw", string(ev.Raw))
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// closeSTT cancels the active STT client and waits for the event reader goroutine
+// to exit before returning. Safe to call with no active STT client.
+func (s *Session) closeSTT() {
+	client := s.sttClient
+	s.sttClient = nil
+	s.sttBytesPushed = 0
+	s.utterancePeak = 0
+	if client == nil {
+		return
+	}
+	_ = client.Close()
+	s.sttWg.Wait()
 }
 
 // SendText JSON-encodes msg and enqueues it for the writer goroutine.

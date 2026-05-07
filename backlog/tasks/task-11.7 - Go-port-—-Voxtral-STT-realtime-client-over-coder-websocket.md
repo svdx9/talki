@@ -1,10 +1,10 @@
 ---
 id: TASK-11.7
 title: Go port — Voxtral STT realtime client over coder/websocket
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:56'
-updated_date: '2026-05-06 22:08'
+updated_date: '2026-05-07 09:13'
 labels:
   - go
   - port
@@ -93,3 +93,13 @@ func (c *Client) Close() error
 - [ ] #4 Two consecutive utterances in the same session both produce transcripts (regression test for the TS bug where the second utterance was silent)
 - [ ] #5 Closing the client WS during an active utterance does not leak goroutines (verify with a small leak check or `runtime.NumGoroutine` before/after)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented `backend-go/internal/stt/voxtral.go` with `Dial`, `SendAudio`, `Flush`, `End`, `Events`, `Close` and a background `readLoop` that filters the spurious flush error. Exported `DialURL` for test injection.
+
+Wired into session: `Session` gained `dialSTT STTDialFunc`, `sttClient`, `sttWg`, `sttBytesPushed`, `utterancePeak` fields. `handleStartSession` dials STT and starts `readSTTEvents` goroutine; `handleEndUtterance` logs peak/dBFS and calls `Flush`; `handleEndSession` calls `closeSTT`; `Run` defers `closeSTT` for WS-close cleanup. `pushAudio` scans PCM samples for peak amplitude and forwards bytes to the STT client.
+
+Four tests in `voxtral_test.go` (happy path, spurious flush, unknown event type, close while in flight) all pass with `-race`. Session tests updated to use a `fakeVoxtralServer` injected via `dialSTT`; full suite passes.
+<!-- SECTION:FINAL_SUMMARY:END -->

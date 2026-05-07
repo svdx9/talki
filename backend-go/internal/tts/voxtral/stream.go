@@ -14,9 +14,7 @@ import (
 	"github.com/svdx9/talki/backend-go/internal/tts"
 )
 
-var (
-	errUnexpectedEventType = errors.New("unexpected event type")
-)
+var errUnexpectedEventType = errors.New("unexpected event type")
 
 // TranscriptionOptions configures a Dial call. All fields are optional.
 type TranscriptionOptions struct {

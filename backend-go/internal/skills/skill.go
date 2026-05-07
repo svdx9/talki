@@ -12,8 +12,10 @@ import (
 //go:embed catalog/*.json
 var Catalog embed.FS
 
-var ErrNoSkills = errors.New("no skills found in catalog")
-var ErrNoSKillId = errors.New("no skill matching id")
+var (
+	ErrNoSkills  = errors.New("no skills found in catalog")
+	ErrNoSKillId = errors.New("no skill matching id")
+)
 
 type Persona struct {
 	Name string `json:"name"`

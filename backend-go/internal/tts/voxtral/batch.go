@@ -16,7 +16,6 @@ import (
 
 var errUpstreamStatus = errors.New("voxtral speech: upstream error")
 
-
 // AudioOptions configures a NewAudioClient call. All fields are optional.
 type AudioOptions struct {
 	// BaseURL overrides the default Voxtral TTS endpoint. Intended for tests.

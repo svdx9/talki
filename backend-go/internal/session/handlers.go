@@ -150,7 +150,7 @@ func (s *Session) handleEndUtterance(ctx context.Context) {
 	s.sttBytesPushed = 0
 	s.utterancePeak = 0
 
-	// TODO(llm): Send transcript to Anthropic and stream response
+	go s.streamAssistant(ctx, s.transcript.String())
 }
 
 // handleEndSession closes the STT connection and clears session state.
@@ -174,6 +174,11 @@ func (s *Session) handleCancel(_ context.Context) {
 		s.transcript.Reset()
 		s.sttBytesPushed = 0
 		s.utterancePeak = 0
-		// TODO: Cancel ongoing LLM operations
 	}
+
+	s.mu.Lock()
+	if s.llmCancel != nil {
+		s.llmCancel()
+	}
+	s.mu.Unlock()
 }

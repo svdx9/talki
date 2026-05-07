@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/svdx9/talki/backend-go/internal/config"
+	"github.com/svdx9/talki/backend-go/internal/llm"
 	"github.com/svdx9/talki/backend-go/internal/protocol"
 	"github.com/svdx9/talki/backend-go/internal/skills"
 	"github.com/svdx9/talki/backend-go/internal/tts"
@@ -54,6 +56,10 @@ type Session struct {
 	transcript    strings.Builder
 	utteranceOpen bool
 	convHistory   []Message
+
+	llmClient *llm.Client
+	mu        sync.Mutex // protects llmCancel
+	llmCancel context.CancelFunc
 
 	dialSTT        STTDialFunc
 	ttsClient      tts.AudioClient
@@ -99,6 +105,7 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 			return voxtral.Dial(ctx, apiKey, model, af, nil)
 		},
 		ttsClient: voxtral.NewAudioClient(cfg.MistralAPIKey, nil),
+		llmClient: llm.NewClient(cfg.AnthropicAPIKey, nil),
 	}
 }
 
@@ -257,6 +264,72 @@ func (s *Session) SendText(ctx context.Context, msg any) {
 	case s.outgoing <- outgoingMsg{data: data, typ: websocket.MessageText}:
 	case <-ctx.Done():
 	}
+}
+
+// streamAssistant sends the user turn to Anthropic, streams text deltas to the
+// client, then appends the full exchange to conversation history and sends to TTS.
+// Intended to run in its own goroutine.
+func (s *Session) streamAssistant(ctx context.Context, userText string) {
+	llmCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.llmCancel = cancel
+	s.mu.Unlock()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		s.llmCancel = nil
+		s.mu.Unlock()
+	}()
+
+	s.convHistory = append(s.convHistory, Message{Role: "user", Content: userText})
+
+	msgs := make([]llm.Message, len(s.convHistory))
+	for i, m := range s.convHistory {
+		msgs[i] = llm.Message{Role: m.Role, Content: m.Content}
+	}
+	req := llm.Request{
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 1024,
+		System:    s.scenario.SystemPrompt,
+		Messages:  msgs,
+	}
+
+	stream, err := s.llmClient.Stream(llmCtx, req)
+	if err != nil {
+		s.log.Error("LLM stream error", "session", s.id, "error", err)
+		s.SendText(ctx, protocol.NewError("LLM error: "+err.Error()))
+		return
+	}
+
+	var fullText strings.Builder
+	for delta := range stream.Deltas() {
+		s.SendText(ctx, protocol.NewAssistantTextDelta(delta))
+		fullText.WriteString(delta)
+	}
+
+	waitErr := stream.Wait()
+	if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
+		s.log.Error("LLM stream wait error", "session", s.id, "error", waitErr)
+		s.SendText(ctx, protocol.NewError("LLM stream error"))
+		return
+	}
+
+	assistantText := fullText.String()
+	if assistantText == "" {
+		return
+	}
+
+	s.convHistory = append(s.convHistory, Message{Role: "assistant", Content: assistantText})
+	s.SendText(ctx, protocol.NewAssistantDone(assistantText))
+
+	go func() {
+		sink := &binaryWriter{ctx: ctx, outgoing: s.outgoing}
+		//exhaustruct:ignore
+		ttsErr := s.ttsClient.Speech(ctx, tts.SpeechVoice{VoiceID: s.scenario.Voice}, assistantText, sink)
+		if ttsErr != nil {
+			s.log.Error("TTS stream error after LLM", "session", s.id, "error", ttsErr)
+		}
+	}()
 }
 
 // ID returns the session ID.

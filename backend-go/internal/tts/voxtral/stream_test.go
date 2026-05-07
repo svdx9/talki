@@ -69,11 +69,11 @@ func doHandshake(t *testing.T, conn *websocket.Conn) {
 	serverWrite(t, conn, map[string]string{"type": "session.updated"})
 }
 
-func dial(t *testing.T, url string) *Client {
+func dial(t *testing.T, url string) *TranscriptionStreamingClient {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	client, err := Dial(ctx, "test-key", "test-model", tts.AudioFormat{Encoding: "pcm_s16le", SampleRate: 16000}, &DialOptions{BaseURL: url})
+	client, err := Dial(ctx, "test-key", "test-model", tts.AudioFormat{Encoding: "pcm_s16le", SampleRate: 16000}, &TranscriptionOptions{BaseURL: url})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

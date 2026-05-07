@@ -22,6 +22,12 @@ import (
 
 var errUnknownSkill = errors.New("unknown skill")
 
+type noopTTSClient struct{}
+
+func (noopTTSClient) Speech(_ context.Context, _ tts.SpeechVoice, _ string, _ io.Writer) error {
+	return nil
+}
+
 type fakeRepo struct {
 	byID map[string]*skills.Skill
 }
@@ -94,8 +100,8 @@ func fakeVoxtralServer(t *testing.T) STTDialFunc {
 	t.Cleanup(srv.Close)
 
 	fakeURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	return func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.STTClient, error) {
-		return voxtral.Dial(ctx, apiKey, model, af, &voxtral.DialOptions{BaseURL: fakeURL})
+	return func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.TranscriptionClient, error) {
+		return voxtral.Dial(ctx, apiKey, model, af, &voxtral.TranscriptionOptions{BaseURL: fakeURL})
 	}
 }
 
@@ -124,6 +130,7 @@ func testServerAndURL(t *testing.T) (*httptest.Server, string, <-chan error) {
 		defer func() { _ = wc.CloseNow() }()
 		sess := New("test-session", wc, cfg, repo, logger)
 		sess.dialSTT = dialSTT
+		sess.ttsClient = noopTTSClient{}
 		runFinished <- sess.Run(r.Context())
 	}))
 	return httpSrv, "ws" + strings.TrimPrefix(httpSrv.URL, "http") + "/ws", runFinished

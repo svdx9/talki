@@ -14,22 +14,20 @@ import (
 	"github.com/svdx9/talki/backend-go/internal/tts"
 )
 
-const voxtralBaseURL = "wss://api.mistral.ai/v1/audio/transcriptions/realtime"
-
 var (
 	errUnexpectedEventType = errors.New("unexpected event type")
 )
 
-// DialOptions configures a Dial call. All fields are optional.
-type DialOptions struct {
+// TranscriptionOptions configures a Dial call. All fields are optional.
+type TranscriptionOptions struct {
 	// BaseURL overrides the default Voxtral WebSocket endpoint.
 	// Intended for tests that spin up a local fake server.
 	BaseURL string
 }
 
-// Client is a live Voxtral STT connection. Always create via Dial.
-// It implements tts.STTClient.
-type Client struct {
+// TranscriptionStreamingClient is a live Voxtral STT connection. Always create via Dial.
+// It implements tts.TranscriptionStreamingClient.
+type TranscriptionStreamingClient struct {
 	conn   *websocket.Conn
 	events chan tts.Event
 	cancel context.CancelFunc
@@ -48,12 +46,12 @@ type rawServerError struct {
 	Message json.RawMessage `json:"message"`
 }
 
-// Dial opens a Voxtral realtime STT connection, performs the session handshake
-// (session.created → session.update → session.updated), then starts the
-// background read loop. Returns a ready-to-use Client on success.
+// Dial opens a Voxtral realtime transcription connection, performs the session
+// handshake (session.created → session.update → session.updated), then starts
+// the background read loop. Returns a ready-to-use TranscriptionClient on success.
 // Pass a non-nil opts to override defaults (e.g. BaseURL for tests).
-func Dial(ctx context.Context, apiKey, model string, af tts.AudioFormat, opts *DialOptions) (*Client, error) {
-	base := voxtralBaseURL
+func Dial(ctx context.Context, apiKey, model string, af tts.AudioFormat, opts *TranscriptionOptions) (*TranscriptionStreamingClient, error) {
+	base := "wss://" + voxtralHost + transcriptionURL
 	if opts != nil && opts.BaseURL != "" {
 		base = opts.BaseURL
 	}
@@ -101,7 +99,7 @@ func Dial(ctx context.Context, apiKey, model string, af tts.AudioFormat, opts *D
 	}
 
 	readCtx, cancel := context.WithCancel(context.Background())
-	c := &Client{
+	c := &TranscriptionStreamingClient{
 		conn:   conn,
 		events: make(chan tts.Event, 64),
 		cancel: cancel,
@@ -131,7 +129,7 @@ func expectEvent(ctx context.Context, conn *websocket.Conn, wantType string) err
 	return nil
 }
 
-func (c *Client) readLoop(ctx context.Context) {
+func (c *TranscriptionStreamingClient) readLoop(ctx context.Context) {
 	// Close events before done so that any goroutine ranging over events
 	// exits before the caller of Close() is unblocked by <-c.done.
 	defer close(c.done)
@@ -180,13 +178,13 @@ func isSpuriousFlushError(msg json.RawMessage) bool {
 
 // Events returns the channel of decoded STT events. The channel is closed
 // when the connection closes or the read loop exits.
-func (c *Client) Events() <-chan tts.Event {
+func (c *TranscriptionStreamingClient) Events() <-chan tts.Event {
 	return c.events
 }
 
 // SendAudio base64-encodes pcm and sends it as an input_audio.append message.
 // Safe to call concurrently; a mutex serializes writes to the connection.
-func (c *Client) SendAudio(ctx context.Context, pcm []byte) error {
+func (c *TranscriptionStreamingClient) SendAudio(ctx context.Context, pcm []byte) error {
 	payload, err := json.Marshal(map[string]string{
 		"type":  "input_audio.append",
 		"audio": base64.StdEncoding.EncodeToString(pcm),
@@ -198,7 +196,7 @@ func (c *Client) SendAudio(ctx context.Context, pcm []byte) error {
 }
 
 // Flush sends input_audio.flush, signalling the end of the current utterance.
-func (c *Client) Flush(ctx context.Context) error {
+func (c *TranscriptionStreamingClient) Flush(ctx context.Context) error {
 	payload, err := json.Marshal(map[string]string{"type": "input_audio.flush"})
 	if err != nil {
 		return fmt.Errorf("voxtral: marshal flush: %w", err)
@@ -207,7 +205,7 @@ func (c *Client) Flush(ctx context.Context) error {
 }
 
 // End sends input_audio.end, signalling no more audio will be sent.
-func (c *Client) End(ctx context.Context) error {
+func (c *TranscriptionStreamingClient) End(ctx context.Context) error {
 	payload, err := json.Marshal(map[string]string{"type": "input_audio.end"})
 	if err != nil {
 		return fmt.Errorf("voxtral: marshal end: %w", err)
@@ -215,14 +213,14 @@ func (c *Client) End(ctx context.Context) error {
 	return c.write(ctx, payload)
 }
 
-func (c *Client) write(ctx context.Context, data []byte) error {
+func (c *TranscriptionStreamingClient) write(ctx context.Context, data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.conn.Write(ctx, websocket.MessageText, data)
 }
 
 // Close cancels the read loop, sends End best-effort, and closes the connection.
-func (c *Client) Close() error {
+func (c *TranscriptionStreamingClient) Close() error {
 	c.cancel()
 	_ = c.End(context.Background())
 	<-c.done

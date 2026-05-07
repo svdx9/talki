@@ -76,7 +76,14 @@ func (s *Session) handleStartSession(ctx context.Context, msg *protocol.StartSes
 
 	s.SendText(ctx, protocol.NewSessionReady(skill.OpeningLine))
 
-	// TODO(tts): Initialize TTS connection with skill's voice
+	go func() {
+		sink := &binaryWriter{ctx: ctx, outgoing: s.outgoing}
+		//exhaustruct:ignore
+		err := s.ttsClient.Speech(ctx, tts.SpeechVoice{VoiceID: skill.Voice}, skill.OpeningLine, sink)
+		if err != nil {
+			s.log.Error("TTS stream error", "session", s.id, "error", err)
+		}
+	}()
 
 	s.log.Info("session started", "session", s.id, "scenario", skill.ID, "title", skill.Title)
 }

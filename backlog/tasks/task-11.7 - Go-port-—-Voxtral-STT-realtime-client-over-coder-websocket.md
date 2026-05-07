@@ -4,7 +4,7 @@ title: Go port — Voxtral STT realtime client over coder/websocket
 status: Done
 assignee: []
 created_date: '2026-05-02 15:56'
-updated_date: '2026-05-07 09:13'
+updated_date: '2026-05-07 14:39'
 labels:
   - go
   - port
@@ -97,9 +97,9 @@ func (c *Client) Close() error
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented `backend-go/internal/stt/voxtral.go` with `Dial`, `SendAudio`, `Flush`, `End`, `Events`, `Close` and a background `readLoop` that filters the spurious flush error. Exported `DialURL` for test injection.
+Implemented `backend-go/internal/tts/voxtral/stream.go` (package `voxtral`) with `Dial`, `SendAudio`, `Flush`, `End`, `Events`, `Close` and a background `readLoop` that filters the spurious flush error. `TranscriptionStreamingClient` and `TranscriptionOptions` are the exported types; `Dial` returns `*TranscriptionStreamingClient`.
 
-Wired into session: `Session` gained `dialSTT STTDialFunc`, `sttClient`, `sttWg`, `sttBytesPushed`, `utterancePeak` fields. `handleStartSession` dials STT and starts `readSTTEvents` goroutine; `handleEndUtterance` logs peak/dBFS and calls `Flush`; `handleEndSession` calls `closeSTT`; `Run` defers `closeSTT` for WS-close cleanup. `pushAudio` scans PCM samples for peak amplitude and forwards bytes to the STT client.
+Wired into session: `Session` gained `dialSTT STTDialFunc`, `sttClient tts.TranscriptionClient`, `sttWg`, `sttBytesPushed`, `utterancePeak` fields. `handleStartSession` dials STT and starts `readSTTEvents` goroutine; `handleEndUtterance` logs peak/dBFS and calls `Flush`; `handleEndSession` calls `closeSTT`; `Run` defers `closeSTT` for WS-close cleanup. `pushAudio` scans PCM samples for peak amplitude and forwards bytes to the STT client.
 
-Four tests in `voxtral_test.go` (happy path, spurious flush, unknown event type, close while in flight) all pass with `-race`. Session tests updated to use a `fakeVoxtralServer` injected via `dialSTT`; full suite passes.
+Four tests in `stream_test.go` (happy path, spurious flush, unknown event type, close while in flight) all pass with `-race`. Session tests updated to use a `fakeVoxtralServer` injected via `dialSTT`; full suite passes.
 <!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,10 +1,9 @@
-// stt is a command-line tool for testing the Voxtral STT API.
-// It reads a 16-bit PCM WAV file and streams it through the realtime
-// transcription endpoint, printing events to stdout.
+// stt is a command-line tool for testing the Voxtral speech APIs.
 //
 // Usage:
 //
-//	MISTRAL_API_KEY=<key> go run ./cmd/stt <file.wav>
+//	MISTRAL_API_KEY=<key> go run ./cmd/stt transcribe <file.wav>
+//	MISTRAL_API_KEY=<key> go run ./cmd/stt speak [-voice <id>] <text> > out.mp3
 package main
 
 import (
@@ -22,26 +21,27 @@ import (
 )
 
 var (
-	errNotRIFF        = errors.New("not a RIFF file")
-	errNotWAVE        = errors.New("not a WAVE file")
+	errNotRIFF          = errors.New("not a RIFF file")
+	errNotWAVE          = errors.New("not a WAVE file")
 	errFmtChunkTooSmall = errors.New("fmt chunk too small")
 	errOnlyPCMSupported = errors.New("only PCM (format 1) supported")
-	errDataBeforeFmt   = errors.New("data chunk before fmt chunk")
+	errDataBeforeFmt    = errors.New("data chunk before fmt chunk")
 )
 
 const (
-	model     = "voxtral-mini-transcribe-realtime-2602"
-	chunkSize = 4096 // bytes per send (~128ms at 16kHz mono 16-bit)
+	transcribeModel = "voxtral-mini-transcribe-realtime-2602"
+	chunkSize       = 4096 // bytes per send (~128ms at 16kHz mono 16-bit)
 )
 
-func main() {
-	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: stt <file.wav>")
-	}
-	flag.Parse()
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage:")
+	fmt.Fprintln(os.Stderr, "  stt transcribe <file.wav>")
+	fmt.Fprintln(os.Stderr, "  stt speak [-voice <id>] <text>")
+}
 
-	if flag.NArg() < 1 {
-		flag.Usage()
+func main() {
+	if len(os.Args) < 2 {
+		usage()
 		os.Exit(1)
 	}
 
@@ -51,7 +51,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	sampleRate, pcm, err := readWAV(flag.Arg(0))
+	switch os.Args[1] {
+	case "transcribe":
+		runTranscribe(apiKey, os.Args[2:])
+	case "speak":
+		runSpeak(apiKey, os.Args[2:])
+	default:
+		usage()
+		os.Exit(1)
+	}
+}
+
+func runTranscribe(apiKey string, args []string) {
+	fs := flag.NewFlagSet("transcribe", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: stt transcribe <file.wav>") }
+	_ = fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	sampleRate, pcm, err := readWAV(fs.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read wav: %v\n", err)
 		os.Exit(1)
@@ -60,14 +81,13 @@ func main() {
 
 	ctx := context.Background()
 	af := tts.AudioFormat{Encoding: "pcm_s16le", SampleRate: sampleRate}
-	client, err := voxtral.Dial(ctx, apiKey, model, af, nil)
+	client, err := voxtral.Dial(ctx, apiKey, transcribeModel, af, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dial: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() { _ = client.Close() }()
 
-	// Send PCM in chunks, then flush.
 	for i := 0; i < len(pcm); i += chunkSize {
 		end := min(i+chunkSize, len(pcm))
 		err = client.SendAudio(ctx, pcm[i:end])
@@ -82,7 +102,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Drain events until transcription.done.
 	for ev := range client.Events() {
 		switch ev.Type {
 		case "transcription.text.delta":
@@ -96,6 +115,43 @@ func main() {
 		default:
 			slog.Debug("event", "type", ev.Type)
 		}
+	}
+}
+
+func runSpeak(apiKey string, args []string) {
+	fs := flag.NewFlagSet("speak", flag.ExitOnError)
+	voiceID := fs.String("voice", "fr_marie_neutral", "Mistral voice ID")
+	refAudioPath := fs.String("ref-audio", "", "path to audio file for zero-shot voice cloning")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: stt speak [-voice <id>|-ref-audio <file>] <text>")
+	}
+	_ = fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fs.Usage()
+		os.Exit(1)
+	}
+
+	var voice tts.SpeechVoice
+	if *voiceID != "" {
+		//exhaustruct:ignore
+		voice = tts.SpeechVoice{VoiceID: *voiceID}
+	} else {
+		raw, err := os.ReadFile(*refAudioPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "speak: read ref-audio: %v\n", err)
+			os.Exit(1)
+		}
+		//exhaustruct:ignore
+		voice = tts.SpeechVoice{RefAudio: raw}
+	}
+
+	ctx := context.Background()
+	client := voxtral.NewAudioClient(apiKey, nil)
+	err := client.Speech(ctx, voice, fs.Arg(0), os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "speak: %v\n", err)
+		os.Exit(1)
 	}
 }
 

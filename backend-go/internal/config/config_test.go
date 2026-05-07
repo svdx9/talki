@@ -35,8 +35,8 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.MistralVoiceID != "female-1" {
-		t.Errorf("MistralVoiceID: want female-1, got %s", cfg.MistralVoiceID)
+	if cfg.MistralVoiceID != "fr_marie_neutral" {
+		t.Errorf("MistralVoiceID: want fr_marie_neutral, got %s", cfg.MistralVoiceID)
 	}
 	if cfg.Port != 8787 {
 		t.Errorf("Port: want 8787, got %d", cfg.Port)

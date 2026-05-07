@@ -37,7 +37,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: anthropic_api_key: %w", ErrMissingAnthropicKey)
 	}
 
-	mistralVoiceID := getEnvOrDefault("MISTRAL_VOICE_ID", "female-1")
+	mistralVoiceID := getEnvOrDefault("MISTRAL_VOICE_ID", "fr_marie_neutral")
 
 	portStr := getEnvOrDefault("PORT", "8787")
 	port, err := strconv.Atoi(portStr)

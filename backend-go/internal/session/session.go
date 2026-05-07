@@ -40,7 +40,7 @@ type outgoingMsg struct {
 
 // STTDialFunc is the signature for opening a realtime STT connection.
 // The default dials Voxtral; tests may substitute a local fake via this field.
-type STTDialFunc func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.STTClient, error)
+type STTDialFunc func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.TranscriptionClient, error)
 
 // Session represents a single WebSocket session with a client.
 type Session struct {
@@ -56,10 +56,32 @@ type Session struct {
 	convHistory   []Message
 
 	dialSTT        STTDialFunc
-	sttClient      tts.STTClient
+	ttsClient      tts.AudioClient
+	sttClient      tts.TranscriptionClient
 	sttWg          sync.WaitGroup
 	sttBytesPushed int
 	utterancePeak  int
+}
+
+// binaryWriter enqueues each Write call as a binary WebSocket frame.
+// It copies p before enqueuing because io.Copy reuses its buffer.
+type binaryWriter struct {
+	ctx      context.Context
+	outgoing chan<- outgoingMsg
+}
+
+func (w *binaryWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	chunk := make([]byte, len(p))
+	copy(chunk, p)
+	select {
+	case w.outgoing <- outgoingMsg{typ: websocket.MessageBinary, data: chunk}:
+		return len(p), nil
+	case <-w.ctx.Done():
+		return 0, w.ctx.Err()
+	}
 }
 
 // New creates a new Session with all required fields.
@@ -73,9 +95,10 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 		outgoing:  make(chan outgoingMsg, outgoingBuffer),
 		allSkills: sr,
 		log:       log,
-		dialSTT: func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.STTClient, error) {
+		dialSTT: func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.TranscriptionClient, error) {
 			return voxtral.Dial(ctx, apiKey, model, af, nil)
 		},
+		ttsClient: voxtral.NewAudioClient(cfg.MistralAPIKey, nil),
 	}
 }
 
@@ -171,7 +194,7 @@ func (s *Session) pushAudio(ctx context.Context, pcm []byte) {
 
 // readSTTEvents ranges over the STT client's event channel and forwards
 // transcript events to the WebSocket client. Runs in its own goroutine.
-func (s *Session) readSTTEvents(ctx context.Context, client tts.STTClient) {
+func (s *Session) readSTTEvents(ctx context.Context, client tts.TranscriptionClient) {
 	defer s.sttWg.Done()
 	for {
 		select {

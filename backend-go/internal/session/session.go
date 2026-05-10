@@ -44,6 +44,26 @@ type outgoingMsg struct {
 // The default dials Voxtral; tests may substitute a local fake via this field.
 type STTDialFunc func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.TranscriptionClient, error)
 
+// llmStream is the interface for a streaming LLM response.
+type llmStream interface {
+	Deltas() <-chan string
+	Wait() error
+}
+
+// llmClientIface is the interface for an LLM client that streams responses.
+type llmClientIface interface {
+	Stream(ctx context.Context, req llm.Request) (llmStream, error)
+}
+
+// llmClientAdapter adapts *llm.Client to llmClientIface.
+type llmClientAdapter struct {
+	c *llm.Client
+}
+
+func (a *llmClientAdapter) Stream(ctx context.Context, req llm.Request) (llmStream, error) {
+	return a.c.Stream(ctx, req)
+}
+
 // Session represents a single WebSocket session with a client.
 type Session struct {
 	id            string
@@ -57,7 +77,7 @@ type Session struct {
 	utteranceOpen bool
 	convHistory   []Message
 
-	llmClient *llm.Client
+	llmClient llmClientIface
 	mu        sync.Mutex // protects llmCancel
 	llmCancel context.CancelFunc
 
@@ -105,7 +125,7 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 			return voxtral.Dial(ctx, apiKey, model, af, nil)
 		},
 		ttsClient: voxtral.NewAudioClient(cfg.MistralAPIKey, nil),
-		llmClient: llm.NewClient(cfg.AnthropicAPIKey, nil),
+		llmClient: &llmClientAdapter{c: llm.NewClient(cfg.AnthropicAPIKey, nil)},
 	}
 }
 
@@ -303,12 +323,25 @@ func (s *Session) streamAssistant(ctx context.Context, userText string) {
 
 	var fullText strings.Builder
 	for delta := range stream.Deltas() {
-		s.SendText(ctx, protocol.NewAssistantTextDelta(delta))
+		s.SendText(llmCtx, protocol.NewAssistantTextDelta(delta))
 		fullText.WriteString(delta)
+		d := delta
+		go func() {
+			sink := &binaryWriter{ctx: llmCtx, outgoing: s.outgoing}
+			//exhaustruct:ignore
+			ttsErr := s.ttsClient.Speech(llmCtx, tts.SpeechVoice{VoiceID: s.scenario.Voice}, d, sink)
+			if ttsErr != nil && !errors.Is(ttsErr, context.Canceled) {
+				s.log.Error("TTS delta error", "session", s.id, "error", ttsErr)
+			}
+		}()
 	}
 
 	waitErr := stream.Wait()
-	if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
+	if errors.Is(waitErr, context.Canceled) {
+		s.log.Warn("assistant stream cancelled", "session", s.id)
+		return
+	}
+	if waitErr != nil {
 		s.log.Error("LLM stream wait error", "session", s.id, "error", waitErr)
 		s.SendText(ctx, protocol.NewError("LLM stream error"))
 		return
@@ -321,15 +354,6 @@ func (s *Session) streamAssistant(ctx context.Context, userText string) {
 
 	s.convHistory = append(s.convHistory, Message{Role: "assistant", Content: assistantText})
 	s.SendText(ctx, protocol.NewAssistantDone(assistantText))
-
-	go func() {
-		sink := &binaryWriter{ctx: ctx, outgoing: s.outgoing}
-		//exhaustruct:ignore
-		ttsErr := s.ttsClient.Speech(ctx, tts.SpeechVoice{VoiceID: s.scenario.Voice}, assistantText, sink)
-		if ttsErr != nil {
-			s.log.Error("TTS stream error after LLM", "session", s.id, "error", ttsErr)
-		}
-	}()
 }
 
 // ID returns the session ID.

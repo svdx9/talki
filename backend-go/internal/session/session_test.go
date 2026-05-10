@@ -14,6 +14,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/svdx9/talki/backend-go/internal/config"
+	"github.com/svdx9/talki/backend-go/internal/llm"
 	"github.com/svdx9/talki/backend-go/internal/protocol"
 	"github.com/svdx9/talki/backend-go/internal/skills"
 	"github.com/svdx9/talki/backend-go/internal/tts"
@@ -311,5 +312,182 @@ func TestSessionClosesCleanly(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("session did not exit within 5 seconds")
+	}
+}
+
+type fakeLLMStream struct {
+	deltas chan string
+	waitCh chan error
+}
+
+func (f *fakeLLMStream) Deltas() <-chan string { return f.deltas }
+func (f *fakeLLMStream) Wait() error           { return <-f.waitCh }
+
+type fakeLLMClient struct {
+	deltas  []string
+	waitErr error
+}
+
+func (f *fakeLLMClient) Stream(_ context.Context, _ llm.Request) (llmStream, error) {
+	fs := &fakeLLMStream{
+		deltas: make(chan string, len(f.deltas)),
+		waitCh: make(chan error, 1),
+	}
+	for _, d := range f.deltas {
+		fs.deltas <- d
+	}
+	close(fs.deltas)
+	fs.waitCh <- f.waitErr
+	return fs, nil
+}
+
+func newDirectSession(llmC llmClientIface, ttsC tts.AudioClient) (*Session, chan outgoingMsg) {
+	out := make(chan outgoingMsg, 64)
+	//exhaustruct:ignore
+	return &Session{
+		id:        "test",
+		outgoing:  out,
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		scenario:  newTestSkill(),
+		llmClient: llmC,
+		ttsClient: ttsC,
+	}, out
+}
+
+func TestStreamAssistantHappyPath(t *testing.T) {
+	t.Parallel()
+	deltas := []string{"Hello", ", ", "world"}
+	fakeClient := &fakeLLMClient{deltas: deltas, waitErr: nil}
+	s, out := newDirectSession(fakeClient, noopTTSClient{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s.streamAssistant(ctx, "hello user")
+
+	// Collect messages: 3 deltas + 1 done
+	var msgs []map[string]any
+	for i := 0; i < len(deltas)+1; i++ {
+		select {
+		case msg := <-out:
+			if msg.typ != websocket.MessageText {
+				t.Fatalf("expected text message, got type %d", msg.typ)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(msg.data, &m); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+			msgs = append(msgs, m)
+		case <-ctx.Done():
+			t.Fatal("timeout waiting for messages")
+		}
+	}
+
+	// Verify 3 assistant_text_delta messages
+	for i, delta := range deltas {
+		if msgType, ok := msgs[i]["type"].(string); !ok || msgType != "assistant_text_delta" {
+			t.Errorf("msg %d: expected assistant_text_delta, got %v", i, msgs[i]["type"])
+		}
+		if text, ok := msgs[i]["text"].(string); !ok || text != delta {
+			t.Errorf("msg %d: expected delta %q, got %q", i, delta, text)
+		}
+	}
+
+	// Verify 1 assistant_done with concatenated text
+	lastIdx := len(deltas)
+	if msgType, ok := msgs[lastIdx]["type"].(string); !ok || msgType != "assistant_done" {
+		t.Errorf("final message: expected assistant_done, got %v", msgs[lastIdx]["type"])
+	}
+	if fullText, ok := msgs[lastIdx]["fullText"].(string); !ok || fullText != "Hello, world" {
+		t.Errorf("final message: expected fullText='Hello, world', got %q", fullText)
+	}
+
+	// Verify history was updated
+	if len(s.convHistory) != 2 {
+		t.Errorf("expected 2 messages in history, got %d", len(s.convHistory))
+	}
+	if len(s.convHistory) >= 1 && s.convHistory[0].Role != "user" {
+		t.Errorf("expected first message to be user, got %s", s.convHistory[0].Role)
+	}
+	if len(s.convHistory) >= 2 && s.convHistory[1].Role != "assistant" {
+		t.Errorf("expected second message to be assistant, got %s", s.convHistory[1].Role)
+	}
+}
+
+type blockingLLMClient struct {
+	blockCh chan struct{}
+}
+
+func (b *blockingLLMClient) Stream(llmCtx context.Context, _ llm.Request) (llmStream, error) {
+	fs := &fakeLLMStream{
+		deltas: make(chan string, 1),
+		waitCh: make(chan error, 1),
+	}
+	fs.deltas <- "first"
+
+	// Block until ctx is cancelled or blockCh is closed
+	go func() {
+		<-llmCtx.Done()
+		close(b.blockCh)
+	}()
+	go func() {
+		<-b.blockCh
+		close(fs.deltas)
+		fs.waitCh <- context.Canceled
+	}()
+
+	return fs, nil
+}
+
+func TestStreamAssistantCancelStopsStream(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	fakeClient := &blockingLLMClient{blockCh: make(chan struct{})}
+	s, out := newDirectSession(fakeClient, noopTTSClient{})
+
+	// Start streamAssistant in a goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.streamAssistant(ctx, "test input")
+	}()
+
+	// Receive the first delta
+	var firstMsg map[string]any
+	select {
+	case m := <-out:
+		if err := json.Unmarshal(m.data, &firstMsg); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for first delta")
+	}
+
+	if msgType, ok := firstMsg["type"].(string); !ok || msgType != "assistant_text_delta" {
+		t.Errorf("expected assistant_text_delta, got %v", firstMsg["type"])
+	}
+
+	// Call cancel
+	s.handleCancel(ctx)
+
+	// Wait for streamAssistant to finish
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("streamAssistant did not finish after cancel")
+	}
+
+	// Verify no assistant_done in the outgoing channel
+	select {
+	case m := <-out:
+		var msg map[string]any
+		json.Unmarshal(m.data, &msg)
+		if msgType, ok := msg["type"].(string); ok && msgType == "assistant_done" {
+			t.Error("expected no assistant_done after cancel")
+		}
+	default:
+		// Good, no more messages
 	}
 }

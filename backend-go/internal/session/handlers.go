@@ -157,6 +157,12 @@ func (s *Session) handleEndUtterance(ctx context.Context) {
 func (s *Session) handleEndSession(_ context.Context) {
 	s.log.Info("end_session", "session", s.id)
 
+	s.mu.Lock()
+	if s.llmCancel != nil {
+		s.llmCancel()
+	}
+	s.mu.Unlock()
+
 	s.closeSTT()
 
 	s.scenario = nil

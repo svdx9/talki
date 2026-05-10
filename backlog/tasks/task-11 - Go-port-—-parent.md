@@ -1,10 +1,10 @@
 ---
 id: TASK-11
 title: Go port — parent
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:54'
-updated_date: '2026-05-06 22:08'
+updated_date: '2026-05-10 15:42'
 labels:
   - go
   - port
@@ -14,7 +14,6 @@ dependencies: []
 priority: high
 ordinal: 1000
 ---
-
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->

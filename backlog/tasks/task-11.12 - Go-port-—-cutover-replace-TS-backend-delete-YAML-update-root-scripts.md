@@ -1,9 +1,10 @@
 ---
 id: TASK-11.12
 title: 'Go port — cutover: replace TS backend, delete YAML, update root scripts'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:58'
+updated_date: '2026-05-10 15:41'
 labels:
   - go
   - port
@@ -14,9 +15,7 @@ dependencies: []
 parent_task_id: TASK-11
 priority: high
 ordinal: 13000
----
-
-## Description
+---## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Final task. Performed only after every other subtask is Done AND a full manual end-to-end smoke test against the Go backend has passed.

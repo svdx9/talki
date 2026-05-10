@@ -1,10 +1,10 @@
 ---
 id: TASK-11.6
 title: Go port — session lifecycle + handler dispatch (upstream calls stubbed)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-02 15:56'
-updated_date: '2026-05-04 14:39'
+updated_date: '2026-05-10'
 labels:
   - go
   - port

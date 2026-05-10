@@ -1,9 +1,10 @@
 ---
 id: TASK-11.11
 title: Go port — DEBUG_WS + per-utterance peak-amplitude diagnostic
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-02 15:57'
+updated_date: '2026-05-10 14:55'
 labels:
   - go
   - port
@@ -39,9 +40,41 @@ Carry over the diagnostic logs that proved load-bearing during the TS debugging 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Setting `DEBUG_WS=true` produces per-frame logs identical in spirit to the TS backend (verify by running both backends and a single utterance)
-- [ ] #2 Each `end_utterance` produces a peak/dBFS/bytes log line
-- [ ] #3 STT events are logged at the right level (warn for events, error for non-spurious upstream errors)
-- [ ] #4 No API key value ever appears in any log output
-- [ ] #5 Transcript final-content log line appears on `transcription.done` and matches the buffered transcript
+- [x] #1 Setting `DEBUG_WS=true` produces per-frame logs identical in spirit to the TS backend (verify by running both backends and a single utterance)
+- [x] #2 Each `end_utterance` produces a peak/dBFS/bytes log line
+- [x] #3 STT events are logged at the right level (warn for events, error for non-spurious upstream errors)
+- [x] #4 No API key value ever appears in any log output
+- [x] #5 Transcript final-content log line appears on `transcription.done` and matches the buffered transcript
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Implementation Complete
+
+All diagnostic logs carried over from TS backend into Go port:
+
+✓ **DEBUG_WS frame logs** — Already in place at `session.go:178-180`
+✓ **Peak amplitude tracking** — Already in place at `session.go:196-205` and `handlers.go:134-143`
+✓ **STT event logs** — Already in place at `session.go:232` (warn level)
+✓ **Transcript logs** — Already in place at `session.go:236,241,245` (warn level)
+✓ **Spurious flush warn log** — Added in `voxtral/stream.go:169`
+
+## Changes Made
+
+1. **`backend-go/internal/tts/voxtral/stream.go`**
+   - Added `log/slog` import
+   - Added `Logger *slog.Logger` field to `TranscriptionOptions`
+   - Added `log *slog.Logger` field to `TranscriptionStreamingClient`
+   - In `Dial()`, resolve logger from opts or use `slog.Default()`
+   - In `readLoop()`, emit warn log on spurious flush
+
+2. **`backend-go/internal/session/session.go`**
+   - Updated `dialSTT` closure in `New()` to thread session logger through `TranscriptionOptions`
+
+## Verification
+
+- All Go tests pass (go test ./...)
+- Code compiles without errors
+- Spurious flush log now appears with structured fields when ignored
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -13,8 +13,10 @@ import (
 	"strings"
 )
 
-var errUpstreamStatus = errors.New("anthropic: upstream error")
-var errAnthropicEvent = errors.New("anthropic: upstream error event")
+var (
+	errUpstreamStatus = errors.New("anthropic: upstream error")
+	errAnthropicEvent = errors.New("anthropic: upstream error event")
+)
 
 // Message is a single turn in a conversation.
 type Message struct {

@@ -122,7 +122,8 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 		allSkills: sr,
 		log:       log,
 		dialSTT: func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.TranscriptionClient, error) {
-			return voxtral.Dial(ctx, apiKey, model, af, nil)
+			//exhaustruct:ignore
+			return voxtral.Dial(ctx, apiKey, model, af, &voxtral.TranscriptionOptions{Logger: log})
 		},
 		ttsClient: voxtral.NewAudioClient(cfg.MistralAPIKey, nil),
 		llmClient: &llmClientAdapter{c: llm.NewClient(cfg.AnthropicAPIKey, nil)},

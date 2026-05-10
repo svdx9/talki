@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,6 +22,9 @@ type TranscriptionOptions struct {
 	// BaseURL overrides the default Voxtral WebSocket endpoint.
 	// Intended for tests that spin up a local fake server.
 	BaseURL string
+	// Logger is the structured logger for spurious flush diagnostics.
+	// If nil, slog.Default() is used.
+	Logger *slog.Logger
 }
 
 // TranscriptionStreamingClient is a live Voxtral STT connection. Always create via Dial.
@@ -31,6 +35,7 @@ type TranscriptionStreamingClient struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	mu     sync.Mutex
+	log    *slog.Logger
 }
 
 type rawServerEvent struct {
@@ -96,6 +101,11 @@ func Dial(ctx context.Context, apiKey, model string, af tts.AudioFormat, opts *T
 		return nil, err
 	}
 
+	log := slog.Default()
+	if opts != nil && opts.Logger != nil {
+		log = opts.Logger
+	}
+
 	readCtx, cancel := context.WithCancel(context.Background())
 	c := &TranscriptionStreamingClient{
 		conn:   conn,
@@ -103,6 +113,7 @@ func Dial(ctx context.Context, apiKey, model string, af tts.AudioFormat, opts *T
 		cancel: cancel,
 		done:   make(chan struct{}),
 		mu:     sync.Mutex{},
+		log:    log,
 	}
 	go c.readLoop(readCtx)
 	return c, nil
@@ -155,6 +166,7 @@ func (c *TranscriptionStreamingClient) readLoop(ctx context.Context) {
 		// because the SDK's internal event loop fires a flush before any audio
 		// is queued. Drop it and keep the connection alive.
 		if ev.Type == "error" && ev.Error != nil && isSpuriousFlushError(ev.Error.Message) {
+			c.log.Warn("Voxtral STT spurious flush ignored")
 			continue
 		}
 

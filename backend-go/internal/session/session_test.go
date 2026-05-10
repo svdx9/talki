@@ -102,6 +102,7 @@ func fakeVoxtralServer(t *testing.T) STTDialFunc {
 
 	fakeURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 	return func(ctx context.Context, apiKey, model string, af tts.AudioFormat) (tts.TranscriptionClient, error) {
+		//exhaustruct:ignore
 		return voxtral.Dial(ctx, apiKey, model, af, &voxtral.TranscriptionOptions{BaseURL: fakeURL})
 	}
 }

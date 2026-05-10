@@ -17,10 +17,10 @@ A browser-based AI tutor for practising spoken French. The learner picks a scena
 | STT (streaming) | Deepgram Nova-3 (`nova-3`, French, opus) |
 | LLM | Anthropic Claude Sonnet 4.6 (`claude-sonnet-4-6`) with prompt caching |
 | TTS (streaming) | ElevenLabs Flash v2.5 (opus output) |
-| Backend | Node.js 22 + TypeScript + Hono + `ws` |
+| Backend | Go 1.25 + chi router + structured logging (slog) |
 | Frontend | SolidJS + TypeScript + Vite, MediaRecorder for opus capture |
-| Skills/scenarios | YAML files validated with Zod |
-| Monorepo | pnpm workspaces (`backend/`, `frontend/`, `shared/`) |
+| Skills/scenarios | JSON files with schema validation |
+| Monorepo | pnpm workspaces (`frontend/`, `shared/`); Go backend in `backend/` |
 
 ## Repository layout
 
@@ -44,11 +44,11 @@ Copy `.env.example` to `.env` (gitignored) and fill in:
 | `ELEVENLABS_API_KEY` | Streaming text-to-speech |
 | `PORT` | HTTP/WS port (default `8787`) |
 
-## Running locally (once implemented)
+## Running locally
 
 ```bash
 pnpm install
-pnpm --filter backend dev      # http://localhost:8787
+make -C backend run            # http://localhost:8787
 pnpm --filter frontend dev     # http://localhost:5173 (Vite, proxies /api → backend)
 ```
 
@@ -56,7 +56,7 @@ In production, the frontend builds to static assets that the backend serves dire
 
 ```bash
 pnpm --filter frontend build
-pnpm --filter backend start
+cd backend && go run ./cmd/server/main.go
 ```
 
 ## WebSocket protocol summary
@@ -68,7 +68,7 @@ Full message shapes live in `shared/src/protocol.ts`.
 
 ## Skills file format
 
-One YAML file per scenario in `backend/src/skills/catalog/`. Each defines: `id`, `title`, CEFR `level`, `voice`, `persona`, `constraints`, `opening_line`, and the full `system_prompt`. Loaded and validated at backend startup.
+One JSON file per scenario in `backend/internal/skills/catalog/`. Each defines: `id`, `title`, CEFR `level`, `voice`, `persona`, `constraints`, `opening_line`, and the full `system_prompt`. Loaded and validated at backend startup.
 
 ## Task tracking
 

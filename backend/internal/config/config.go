@@ -9,21 +9,37 @@ import (
 	"strings"
 )
 
+const (
+	ProviderAnthropic = "anthropic"
+	ProviderOpenCode  = "opencode"
+
+	anthropicBaseURL = "https://api.anthropic.com/v1/messages"
+	openCodeBaseURL  = "https://opencode.ai/zen/v1/messages"
+
+	DefaultLLMModel = "claude-sonnet-4-6"
+)
+
 var (
 	ErrMissingMistralKey   = errors.New("missing required MISTRAL_API_KEY")
 	ErrMissingAnthropicKey = errors.New("missing required ANTHROPIC_API_KEY")
+	ErrMissingOpenCodeKey  = errors.New("missing required OPENCODE_API_KEY")
+	ErrMissingLLMProvider  = errors.New("missing required LLM_PROVIDER")
+	ErrInvalidLLMProvider  = errors.New("invalid LLM_PROVIDER: must be anthropic or opencode")
 	ErrInvalidBool         = errors.New("invalid boolean value")
 	ErrInvalidLogLevel     = errors.New("invalid log level")
 )
 
 type Config struct {
-	MistralAPIKey   string
-	AnthropicAPIKey string
-	MistralVoiceID  string
-	Port            int
-	DebugWS         bool
-	LogLevel        slog.Level
-	Env             string
+	MistralAPIKey  string
+	LLMProvider    string
+	LLMAPIKey      string
+	LLMBaseURL     string
+	LLMModel       string
+	MistralVoiceID string
+	Port           int
+	DebugWS        bool
+	LogLevel       slog.Level
+	Env            string
 }
 
 func Load() (Config, error) {
@@ -32,10 +48,30 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: mistral_api_key: %w", ErrMissingMistralKey)
 	}
 
-	anthropicKey := requireEnv("ANTHROPIC_API_KEY")
-	if anthropicKey == "" {
-		return Config{}, fmt.Errorf("config: anthropic_api_key: %w", ErrMissingAnthropicKey)
+	provider := requireEnv("LLM_PROVIDER")
+	if provider == "" {
+		return Config{}, fmt.Errorf("config: llm_provider: %w", ErrMissingLLMProvider)
 	}
+
+	var llmAPIKey, llmBaseURL string
+	switch provider {
+	case ProviderAnthropic:
+		llmAPIKey = requireEnv("ANTHROPIC_API_KEY")
+		if llmAPIKey == "" {
+			return Config{}, fmt.Errorf("config: anthropic_api_key: %w", ErrMissingAnthropicKey)
+		}
+		llmBaseURL = anthropicBaseURL
+	case ProviderOpenCode:
+		llmAPIKey = requireEnv("OPENCODE_API_KEY")
+		if llmAPIKey == "" {
+			return Config{}, fmt.Errorf("config: opencode_api_key: %w", ErrMissingOpenCodeKey)
+		}
+		llmBaseURL = openCodeBaseURL
+	default:
+		return Config{}, fmt.Errorf("config: llm_provider %q: %w", provider, ErrInvalidLLMProvider)
+	}
+
+	llmModel := getEnvOrDefault("LLM_MODEL", DefaultLLMModel)
 
 	mistralVoiceID := getEnvOrDefault("MISTRAL_VOICE_ID", "fr_marie_neutral")
 
@@ -60,13 +96,16 @@ func Load() (Config, error) {
 	env := getEnvOrDefault("ENV", "dev")
 
 	return Config{
-		MistralAPIKey:   mistralKey,
-		AnthropicAPIKey: anthropicKey,
-		MistralVoiceID:  mistralVoiceID,
-		Port:            port,
-		DebugWS:         debugWS,
-		LogLevel:        logLevel,
-		Env:             env,
+		MistralAPIKey:  mistralKey,
+		LLMProvider:    provider,
+		LLMAPIKey:      llmAPIKey,
+		LLMBaseURL:     llmBaseURL,
+		LLMModel:       llmModel,
+		MistralVoiceID: mistralVoiceID,
+		Port:           port,
+		DebugWS:        debugWS,
+		LogLevel:       logLevel,
+		Env:            env,
 	}, nil
 }
 
@@ -118,23 +157,29 @@ func parseLogLevel(val string) (slog.Level, error) {
 }
 
 type ConfigRedacted struct {
-	MistralAPIKey   string
-	AnthropicAPIKey string
-	MistralVoiceID  string
-	Port            int
-	DebugWS         bool
-	LogLevel        string
-	Env             string
+	MistralAPIKey  string
+	LLMProvider    string
+	LLMAPIKey      string
+	LLMBaseURL     string
+	LLMModel       string
+	MistralVoiceID string
+	Port           int
+	DebugWS        bool
+	LogLevel       string
+	Env            string
 }
 
 func (c Config) Redacted() ConfigRedacted {
 	return ConfigRedacted{
-		MistralAPIKey:   "set",
-		AnthropicAPIKey: "set",
-		MistralVoiceID:  c.MistralVoiceID,
-		Port:            c.Port,
-		DebugWS:         c.DebugWS,
-		LogLevel:        c.LogLevel.String(),
-		Env:             c.Env,
+		MistralAPIKey:  "set",
+		LLMProvider:    c.LLMProvider,
+		LLMAPIKey:      "set",
+		LLMBaseURL:     c.LLMBaseURL,
+		LLMModel:       c.LLMModel,
+		MistralVoiceID: c.MistralVoiceID,
+		Port:           c.Port,
+		DebugWS:        c.DebugWS,
+		LogLevel:       c.LogLevel.String(),
+		Env:            c.Env,
 	}
 }

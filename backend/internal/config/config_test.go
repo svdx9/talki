@@ -6,9 +6,17 @@ import (
 	"testing"
 )
 
+// setAnthropicProvider is a helper that configures the minimal env vars for
+// the anthropic provider so tests that focus on other fields don't repeat it.
+func setAnthropicProvider(t *testing.T) {
+	t.Helper()
+	t.Setenv("LLM_PROVIDER", "anthropic")
+	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
+}
+
 func TestLoad_MissingMistralKey(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "")
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 
 	_, err := Load()
 	if !errors.Is(err, ErrMissingMistralKey) {
@@ -16,8 +24,29 @@ func TestLoad_MissingMistralKey(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingLLMProvider(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "test-mistral")
+	t.Setenv("LLM_PROVIDER", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingLLMProvider) {
+		t.Errorf("want ErrMissingLLMProvider, got %v", err)
+	}
+}
+
+func TestLoad_InvalidLLMProvider(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "test-mistral")
+	t.Setenv("LLM_PROVIDER", "groq")
+
+	_, err := Load()
+	if !errors.Is(err, ErrInvalidLLMProvider) {
+		t.Errorf("want ErrInvalidLLMProvider, got %v", err)
+	}
+}
+
 func TestLoad_MissingAnthropicKey(t *testing.T) {
 	t.Setenv("MISTRAL_API_KEY", "test-key")
+	t.Setenv("LLM_PROVIDER", "anthropic")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	_, err := Load()
@@ -26,9 +55,88 @@ func TestLoad_MissingAnthropicKey(t *testing.T) {
 	}
 }
 
-func TestLoad_Defaults(t *testing.T) {
+func TestLoad_MissingOpenCodeKey(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "test-key")
+	t.Setenv("LLM_PROVIDER", "opencode")
+	t.Setenv("OPENCODE_API_KEY", "")
+
+	_, err := Load()
+	if !errors.Is(err, ErrMissingOpenCodeKey) {
+		t.Errorf("want ErrMissingOpenCodeKey, got %v", err)
+	}
+}
+
+func TestLoad_AnthropicProvider(t *testing.T) {
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
+	t.Setenv("LLM_PROVIDER", "anthropic")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LLMProvider != ProviderAnthropic {
+		t.Errorf("LLMProvider: want %s, got %s", ProviderAnthropic, cfg.LLMProvider)
+	}
+	if cfg.LLMAPIKey != "sk-ant-test" {
+		t.Errorf("LLMAPIKey: want sk-ant-test, got %s", cfg.LLMAPIKey)
+	}
+	if cfg.LLMBaseURL != anthropicBaseURL {
+		t.Errorf("LLMBaseURL: want %s, got %s", anthropicBaseURL, cfg.LLMBaseURL)
+	}
+}
+
+func TestLoad_OpenCodeProvider(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "test-mistral")
+	t.Setenv("LLM_PROVIDER", "opencode")
+	t.Setenv("OPENCODE_API_KEY", "oc-test")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LLMProvider != ProviderOpenCode {
+		t.Errorf("LLMProvider: want %s, got %s", ProviderOpenCode, cfg.LLMProvider)
+	}
+	if cfg.LLMAPIKey != "oc-test" {
+		t.Errorf("LLMAPIKey: want oc-test, got %s", cfg.LLMAPIKey)
+	}
+	if cfg.LLMBaseURL != openCodeBaseURL {
+		t.Errorf("LLMBaseURL: want %s, got %s", openCodeBaseURL, cfg.LLMBaseURL)
+	}
+}
+
+func TestLoad_LLMModelDefault(t *testing.T) {
+	setAnthropicProvider(t)
+	t.Setenv("MISTRAL_API_KEY", "test-mistral")
+	t.Setenv("LLM_MODEL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LLMModel != DefaultLLMModel {
+		t.Errorf("LLMModel: want %s, got %s", DefaultLLMModel, cfg.LLMModel)
+	}
+}
+
+func TestLoad_LLMModelOverride(t *testing.T) {
+	setAnthropicProvider(t)
+	t.Setenv("MISTRAL_API_KEY", "test-mistral")
+	t.Setenv("LLM_MODEL", "claude-opus-4-7")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LLMModel != "claude-opus-4-7" {
+		t.Errorf("LLMModel: want claude-opus-4-7, got %s", cfg.LLMModel)
+	}
+}
+
+func TestLoad_Defaults(t *testing.T) {
+	setAnthropicProvider(t)
+	t.Setenv("MISTRAL_API_KEY", "test-mistral")
 
 	cfg, err := Load()
 	if err != nil {
@@ -53,8 +161,8 @@ func TestLoad_Defaults(t *testing.T) {
 }
 
 func TestLoad_InvalidPort(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 	t.Setenv("PORT", "not-a-number")
 
 	_, err := Load()
@@ -64,8 +172,8 @@ func TestLoad_InvalidPort(t *testing.T) {
 }
 
 func TestLoad_DebugWSParsing(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 
 	tests := []struct {
 		name  string
@@ -101,8 +209,8 @@ func TestLoad_DebugWSParsing(t *testing.T) {
 }
 
 func TestLoad_InvalidDebugWS(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 	t.Setenv("DEBUG_WS", "maybe")
 
 	_, err := Load()
@@ -112,8 +220,8 @@ func TestLoad_InvalidDebugWS(t *testing.T) {
 }
 
 func TestLoad_CustomValues(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 	t.Setenv("MISTRAL_VOICE_ID", "male-2")
 	t.Setenv("PORT", "3000")
 	t.Setenv("DEBUG_WS", "true")
@@ -143,8 +251,8 @@ func TestLoad_CustomValues(t *testing.T) {
 }
 
 func TestLoad_LogLevel(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 
 	tests := []struct {
 		value string
@@ -171,8 +279,8 @@ func TestLoad_LogLevel(t *testing.T) {
 }
 
 func TestLoad_InvalidLogLevel(t *testing.T) {
+	setAnthropicProvider(t)
 	t.Setenv("MISTRAL_API_KEY", "test-mistral")
-	t.Setenv("ANTHROPIC_API_KEY", "test-anthropic")
 	t.Setenv("LOG_LEVEL", "invalid")
 
 	_, err := Load()
@@ -184,13 +292,16 @@ func TestLoad_InvalidLogLevel(t *testing.T) {
 func TestConfigRedacted(t *testing.T) {
 	t.Parallel()
 	cfg := Config{
-		MistralAPIKey:   "secret-mistral",
-		AnthropicAPIKey: "secret-anthropic",
-		MistralVoiceID:  "female-1",
-		Port:            8787,
-		DebugWS:         false,
-		LogLevel:        slog.LevelInfo,
-		Env:             "dev",
+		MistralAPIKey:  "secret-mistral",
+		LLMProvider:    ProviderAnthropic,
+		LLMAPIKey:      "secret-llm",
+		LLMBaseURL:     anthropicBaseURL,
+		LLMModel:       DefaultLLMModel,
+		MistralVoiceID: "female-1",
+		Port:           8787,
+		DebugWS:        false,
+		LogLevel:       slog.LevelInfo,
+		Env:            "dev",
 	}
 
 	redacted := cfg.Redacted()
@@ -198,8 +309,17 @@ func TestConfigRedacted(t *testing.T) {
 	if redacted.MistralAPIKey != "set" {
 		t.Errorf("MistralAPIKey: want set, got %s", redacted.MistralAPIKey)
 	}
-	if redacted.AnthropicAPIKey != "set" {
-		t.Errorf("AnthropicAPIKey: want set, got %s", redacted.AnthropicAPIKey)
+	if redacted.LLMAPIKey != "set" {
+		t.Errorf("LLMAPIKey: want set, got %s", redacted.LLMAPIKey)
+	}
+	if redacted.LLMProvider != ProviderAnthropic {
+		t.Errorf("LLMProvider: want %s, got %s", ProviderAnthropic, redacted.LLMProvider)
+	}
+	if redacted.LLMBaseURL != anthropicBaseURL {
+		t.Errorf("LLMBaseURL: want %s, got %s", anthropicBaseURL, redacted.LLMBaseURL)
+	}
+	if redacted.LLMModel != DefaultLLMModel {
+		t.Errorf("LLMModel: want %s, got %s", DefaultLLMModel, redacted.LLMModel)
 	}
 	if redacted.MistralVoiceID != "female-1" {
 		t.Errorf("MistralVoiceID: want female-1, got %s", redacted.MistralVoiceID)

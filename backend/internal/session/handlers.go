@@ -150,7 +150,6 @@ func (s *Session) handleEndUtterance(ctx context.Context) {
 	s.sttBytesPushed = 0
 	s.utterancePeak = 0
 
-	go s.streamAssistant(ctx, s.transcript.String())
 }
 
 // handleEndSession closes the STT connection and clears session state.

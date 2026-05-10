@@ -39,16 +39,20 @@ type Client struct {
 	baseURL string
 }
 
-// NewClient returns a Client for the given API key.
+// NewClient returns a Client for the given API key and base URL.
+// If baseURL is empty, it defaults to the Anthropic Messages API endpoint.
 // Pass a non-nil hc to override the default http.Client (useful for tests).
-func NewClient(apiKey string, hc *http.Client) *Client {
+func NewClient(apiKey, baseURL string, hc *http.Client) *Client {
 	if hc == nil {
 		hc = &http.Client{}
+	}
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com/v1/messages"
 	}
 	return &Client{
 		hc:      hc,
 		apiKey:  apiKey,
-		baseURL: "https://api.anthropic.com/v1/messages",
+		baseURL: baseURL,
 	}
 }
 

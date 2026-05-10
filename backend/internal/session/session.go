@@ -126,7 +126,7 @@ func New(id string, conn *websocket.Conn, cfg config.Config, sr skills.Repositor
 			return voxtral.Dial(ctx, apiKey, model, af, &voxtral.TranscriptionOptions{Logger: log})
 		},
 		ttsClient: voxtral.NewAudioClient(cfg.MistralAPIKey, nil),
-		llmClient: &llmClientAdapter{c: llm.NewClient(cfg.AnthropicAPIKey, nil)},
+		llmClient: &llmClientAdapter{c: llm.NewClient(cfg.LLMAPIKey, cfg.LLMBaseURL, nil)},
 	}
 }
 
@@ -246,6 +246,9 @@ func (s *Session) readSTTEvents(ctx context.Context, client tts.TranscriptionCli
 				final := s.transcript.String()
 				s.log.Warn("transcript final", "session", s.id, "text", final)
 				s.SendText(ctx, protocol.NewTranscript("", true))
+				if final != "" {
+					go s.streamAssistant(ctx, final)
+				}
 			case "error":
 				s.log.Error("STT error", "session", s.id, "raw", string(ev.Raw))
 				s.SendText(ctx, protocol.NewError("STT error"))
@@ -309,7 +312,7 @@ func (s *Session) streamAssistant(ctx context.Context, userText string) {
 		msgs[i] = llm.Message{Role: m.Role, Content: m.Content}
 	}
 	req := llm.Request{
-		Model:     "claude-sonnet-4-6",
+		Model:     s.cfg.LLMModel,
 		MaxTokens: 1024,
 		System:    s.scenario.SystemPrompt,
 		Messages:  msgs,

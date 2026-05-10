@@ -112,11 +112,12 @@ func testServerAndURL(t *testing.T) (*httptest.Server, string, <-chan error) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	//exhaustruct:ignore
 	cfg := config.Config{
-		Port:            0,
-		LogLevel:        slog.LevelInfo,
-		DebugWS:         false,
-		MistralAPIKey:   "test-key",
-		AnthropicAPIKey: "test-key",
+		Port:          0,
+		LogLevel:      slog.LevelInfo,
+		DebugWS:       false,
+		MistralAPIKey: "test-key",
+		LLMAPIKey:     "test-key",
+		LLMModel:      config.DefaultLLMModel,
 	}
 	repo := newTestRepo()
 	runFinished := make(chan error, 1)

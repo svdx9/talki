@@ -1,0 +1,32 @@
+version: "2"
+linters:
+  # default: standard
+  enable:
+    - unused
+    - exhaustive
+    - err113
+    # - revive
+    - paralleltest
+    - misspell
+    - intrange
+    - noinlineerr
+    - gochecknoglobals
+    - exhaustruct
+    - nosprintfhostport
+    - perfsprint
+    - protogetter
+    - recvcheck
+  settings:
+    exhaustruct:
+      allow-empty: true
+      exclude:
+        - ".*/conjugator\\.VerbFormParameters"
+    misspell:
+      ignore-rules:
+        - participe
+
+  disable:
+    - depguard
+issues:
+  max-same-issues: 0 # 0 = unlimited
+  max-issues-per-linter: 0

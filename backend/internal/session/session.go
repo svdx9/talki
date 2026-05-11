@@ -235,17 +235,17 @@ func (s *Session) readSTTEvents(ctx context.Context, client tts.TranscriptionCli
 			case "transcription.text.delta":
 				s.transcript.WriteString(ev.Text)
 				s.log.Warn("transcript delta", "session", s.id, "text", ev.Text)
-				s.SendText(ctx, protocol.NewTranscript(ev.Text, false))
+				s.SendText(ctx, protocol.NewTranscript(s.transcript.String(), false))
 			case "transcription.segment.delta":
 				if ev.Text != "" {
 					s.transcript.WriteString(ev.Text)
 					s.log.Warn("transcript delta", "session", s.id, "text", ev.Text)
-					s.SendText(ctx, protocol.NewTranscript(ev.Text, false))
+					s.SendText(ctx, protocol.NewTranscript(s.transcript.String(), false))
 				}
 			case "transcription.done":
 				final := s.transcript.String()
 				s.log.Warn("transcript final", "session", s.id, "text", final)
-				s.SendText(ctx, protocol.NewTranscript("", true))
+				s.SendText(ctx, protocol.NewTranscript(final, true))
 				if final != "" {
 					go s.streamAssistant(ctx, final)
 				}
@@ -329,15 +329,6 @@ func (s *Session) streamAssistant(ctx context.Context, userText string) {
 	for delta := range stream.Deltas() {
 		s.SendText(llmCtx, protocol.NewAssistantTextDelta(delta))
 		fullText.WriteString(delta)
-		d := delta
-		go func() {
-			sink := &binaryWriter{ctx: llmCtx, outgoing: s.outgoing}
-			//exhaustruct:ignore
-			ttsErr := s.ttsClient.Speech(llmCtx, tts.SpeechVoice{VoiceID: s.scenario.Voice}, d, sink)
-			if ttsErr != nil && !errors.Is(ttsErr, context.Canceled) {
-				s.log.Error("TTS delta error", "session", s.id, "error", ttsErr)
-			}
-		}()
 	}
 
 	waitErr := stream.Wait()
@@ -358,6 +349,13 @@ func (s *Session) streamAssistant(ctx context.Context, userText string) {
 
 	s.convHistory = append(s.convHistory, Message{Role: "assistant", Content: assistantText})
 	s.SendText(ctx, protocol.NewAssistantDone(assistantText))
+
+	sink := &binaryWriter{ctx: ctx, outgoing: s.outgoing}
+	//exhaustruct:ignore
+	ttsErr := s.ttsClient.Speech(ctx, tts.SpeechVoice{VoiceID: s.scenario.Voice}, assistantText, sink)
+	if ttsErr != nil && !errors.Is(ttsErr, context.Canceled) {
+		s.log.Error("TTS error", "session", s.id, "error", ttsErr)
+	}
 }
 
 // ID returns the session ID.

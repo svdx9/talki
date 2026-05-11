@@ -24,6 +24,7 @@ export class OpusPlayer {
       }
       try {
         this.sourceBuffer = this.mediaSource.addSourceBuffer(mimeType);
+        this.sourceBuffer.mode = "sequence";
         this.sourceBuffer.addEventListener("error", (_e) => {});
         this.sourceBuffer.addEventListener("updateend", () => {
           this.drainQueue();

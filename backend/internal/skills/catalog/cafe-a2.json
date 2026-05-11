@@ -3,7 +3,7 @@
   "title": "Ordering coffee at a Lyon café",
   "level": "A2",
   "locale": "fr-FR",
-  "voice": "1024d823-a11e-43ee-bf3d-d440dccc0577",
+  "voice": "fr_marie_sad",
   "persona": {
     "name": "Camille",
     "role": "barista at a busy Lyon café"
